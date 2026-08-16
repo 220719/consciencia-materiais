@@ -1,7 +1,10 @@
 import os
 
-import streamlit as st
 from dotenv import load_dotenv
+
+load_dotenv()
+
+import streamlit as st
 from supabase import create_client, ClientOptions
 
 from extracao import (
@@ -24,17 +27,21 @@ SISTEMAS_CRISTALINOS = ["Selecione...", "Cúbico", "Tetragonal", "Ortorrômbico"
 TECNICAS_MEDICAO = ["Selecione...", "DRX laboratório (Cu Kα)", "Síncrotron", "Nêutrons", "Outra"]
 ATMOSFERAS = ["Selecione...", "Ar", "O2", "N2", "Vácuo"]
 
+
 @st.cache_resource
-def get_token_orcid_publico():
-    # Token de leitura pública do ORCID: não é específico de nenhum professor,
-    # então é seguro compartilhar entre todas as sessões via cache_resource.
-    return obter_token_publico_orcid()
 def get_supabase_client():
     return create_client(
         SUPABASE_URL,
         SUPABASE_ANON_KEY,
         options=ClientOptions(flow_type="pkce"),
     )
+
+
+@st.cache_resource
+def get_token_orcid_publico():
+    # Token de leitura pública do ORCID: não é específico de nenhum professor,
+    # então é seguro compartilhar entre todas as sessões via cache_resource.
+    return obter_token_publico_orcid()
 
 
 supabase = get_supabase_client()
@@ -52,12 +59,15 @@ def fazer_login():
     st.title("🧪 Consciência de Materiais")
     st.caption("Entre com seu ORCID para cadastrar materiais.")
 
-    auth_url, _ = supabase.auth._get_url_for_provider(
-        f"{supabase.auth._url}/authorize",
-        "custom:orcid",
-        {"redirect_to": REDIRECT_URL},
-    )
-    st.link_button("Entrar com ORCID", auth_url)
+    if "auth_url" not in st.session_state:
+        auth_url, _ = supabase.auth._get_url_for_provider(
+            f"{supabase.auth._url}/authorize",
+            "custom:orcid",
+            {"redirect_to": REDIRECT_URL},
+        )
+        st.session_state["auth_url"] = auth_url
+
+    st.link_button("Entrar com ORCID", st.session_state["auth_url"])
 
 
 def processar_callback():
@@ -88,7 +98,13 @@ def processar_callback():
         st.query_params.clear()
         st.rerun()
     except Exception as e:
+        # Limpa o código morto da URL e força gerar um link novo na próxima tentativa
+        st.query_params.clear()
+        st.session_state.pop("auth_url", None)
         st.error(f"Erro ao validar login: {e}")
+        st.caption("O link de autorização anterior expirou ou já foi usado.")
+        if st.button("Tentar login novamente"):
+            st.rerun()
     return True
 
 
@@ -106,6 +122,7 @@ def get_professor_logado():
         .execute()
     )
     return professor.data
+
 
 def executar_extracao_por_doi(doi):
     urls = listar_locais_openaccess(doi)
