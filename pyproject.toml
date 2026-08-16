@@ -9,6 +9,7 @@ dependencies = [
     "pypdf>=6.16.1",
     "python-dotenv>=1.2.2",
     "requests>=2.34.2",
+    "resend>=2.36.0",
     "streamlit>=1.61.1",
     "supabase>=2.31.0",
 ]

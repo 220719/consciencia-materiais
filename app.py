@@ -371,18 +371,7 @@ if processar_callback():
 
 if "access_token" in st.session_state:
     professor = get_professor_logado()
-    if not professor.get("aprovado"):
-        st.title("🧪 Consciência de Materiais")
-        st.warning(
-            "Sua conta foi criada, mas ainda não foi aprovada para acessar a plataforma. "
-            "Entre em contato com o administrador."
-        )
-        if st.button("Sair"):
-            supabase.auth.sign_out()
-            st.session_state.clear()
-            st.rerun()
-    else:
-        formulario_material(professor)
+    formulario_material(professor)
 else:
     fazer_login()
 
