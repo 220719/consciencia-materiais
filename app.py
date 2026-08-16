@@ -20,7 +20,9 @@ load_dotenv()
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_ANON_KEY = os.environ["SUPABASE_ANON_KEY"]
-REDIRECT_URL = "http://localhost:8502"
+# Local usa localhost por padrão; no Streamlit Cloud, definimos REDIRECT_URL
+# nos secrets apontando para a URL pública do app.
+REDIRECT_URL = os.environ.get("REDIRECT_URL", "http://localhost:8502")
 
 SISTEMAS_CRISTALINOS = ["Selecione...", "Cúbico", "Tetragonal", "Ortorrômbico", "Romboédrico",
                          "Hexagonal", "Monoclínico", "Triclínico"]
