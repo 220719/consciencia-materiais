@@ -13,3 +13,4 @@ wheels/
 .env
 .streamlit/secrets.toml
 *.db
+backups/
