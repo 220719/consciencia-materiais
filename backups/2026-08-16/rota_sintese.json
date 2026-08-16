@@ -1,0 +1,18 @@
+[
+  {
+    "id": "58ef22e9-4523-4c52-bf09-94e9db47639a",
+    "material_id": "61dd92bb-cc56-4aa2-a234-1f02bd02abaa",
+    "metodo": "Reação em estado sólido com moagem de alta energia e sinterização por queima rápida (fast firing)",
+    "precursores": "Bi2O3, Fe2O3, Co3O4",
+    "pureza_precursores": null,
+    "temp_calcinacao": 890.0,
+    "tempo_calcinacao": 0.05,
+    "taxa_aquecimento": null,
+    "taxa_resfriamento": null,
+    "atmosfera": "Ar",
+    "moagem_tipo": null,
+    "moagem_tempo": null,
+    "etapas": null,
+    "criado_em": "2026-08-16T02:53:37.031771+00:00"
+  }
+]
