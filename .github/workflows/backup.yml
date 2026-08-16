@@ -2,14 +2,12 @@ name: Backup semanal do banco
 
 on:
   schedule:
-    - cron: "0 6 * * 1"  # toda segunda-feira as 06:00 UTC (03:00 em Brasilia)
-  workflow_dispatch:  # permite rodar manualmente pelo botao no GitHub
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
 
 jobs:
   backup:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -26,10 +24,16 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python backup.py
 
-      - name: Commitar backup
+      - name: Clonar repositorio privado de backups
         run: |
+          git clone https://x-access-token:${{ secrets.BACKUP_REPO_TOKEN }}@github.com/220719/consciencia-materiais-backups.git repo-backups
+
+      - name: Copiar e enviar backup
+        run: |
+          cp -r backups/* repo-backups/
+          cd repo-backups
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add backups/
+          git add .
           git diff --staged --quiet || git commit -m "chore: backup automatico $(date -I)"
           git push
