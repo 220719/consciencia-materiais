@@ -8,3 +8,8 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Segredos e dados locais
+.env
+.streamlit/secrets.toml
+*.db
