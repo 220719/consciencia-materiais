@@ -48,7 +48,7 @@ def get_token_orcid_publico():
 
 supabase = get_supabase_client()
 
-st.set_page_config(page_title="Consciência de Materiais", page_icon="🧪", layout="centered")
+st.set_page_config(page_title="Rede de Materiais", page_icon="🧪", layout="centered")
 
 
 def idx_selectbox(opcoes, valor):
@@ -57,8 +57,34 @@ def idx_selectbox(opcoes, valor):
     return 0
 
 
+def cabecalho_institucional():
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.image("assets/logo_gddm.png", use_container_width=True)
+
+    st.markdown(
+        """
+        <div style="text-align: center; margin-top: -8px; margin-bottom: 20px;">
+            <div style="font-size: 15px; font-weight: 600; color: #1a1a2e; letter-spacing: 0.4px;">
+                Universidade Estadual de Maringá
+            </div>
+            <div style="font-size: 13px; color: #555555; margin-top: 2px;">
+                Departamento de Física
+            </div>
+            <div style="font-size: 12px; color: #888888; margin-top: 4px; letter-spacing: 0.3px;">
+                Grupo de Desenvolvimento e Inovação em Dispositivos Multifuncionais (GDDM)
+            </div>
+        </div>
+        <hr style="border: none; border-top: 1px solid #e5e5e5; margin: 8px 0 28px 0;">
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def fazer_login():
-    st.title("🧪 Consciência de Materiais")
+    cabecalho_institucional()
+
+    st.title("🧪 Rede de Materiais")
     st.caption("Entre com seu ORCID para cadastrar materiais.")
 
     if "auth_url" not in st.session_state:
@@ -213,7 +239,7 @@ def secao_extracao_automatica(professor):
 
 
 def formulario_material(professor):
-    st.title("🧪 Consciência de Materiais")
+    st.title("🧪 Rede de Materiais")
     col_a, col_b = st.columns([4, 1])
     with col_a:
         st.caption(f"Logado como {professor['nome'] or professor['email'] or 'professor'}")
