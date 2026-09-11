@@ -1,4 +1,5 @@
 import os
+from urllib.parse import urlencode, urlparse
 
 from dotenv import load_dotenv
 
@@ -6,6 +7,7 @@ load_dotenv()
 
 import streamlit as st
 from supabase import create_client, ClientOptions
+from supabase_auth.helpers import generate_pkce_challenge, generate_pkce_verifier
 
 from extracao import (
     listar_locais_openaccess,
@@ -16,27 +18,36 @@ from extracao import (
     listar_publicacoes_orcid,
 )
 
-load_dotenv()
-
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_ANON_KEY = os.environ["SUPABASE_ANON_KEY"]
-# Local usa localhost por padrão; no Streamlit Cloud, definimos REDIRECT_URL
-# nos secrets apontando para a URL pública do app.
-REDIRECT_URL = os.environ.get("REDIRECT_URL", "http://localhost:8502")
-
 SISTEMAS_CRISTALINOS = ["Selecione...", "Cúbico", "Tetragonal", "Ortorrômbico", "Romboédrico",
                          "Hexagonal", "Monoclínico", "Triclínico"]
 TECNICAS_MEDICAO = ["Selecione...", "DRX laboratório (Cu Kα)", "Síncrotron", "Nêutrons", "Outra"]
 ATMOSFERAS = ["Selecione...", "Ar", "O2", "N2", "Vácuo"]
 
 
+def _get_secret(name: str, default: str | None = None) -> str | None:
+    valor = os.environ.get(name)
+    if valor:
+        return valor
+    try:
+        return str(st.secrets[name])
+    except Exception:
+        return default
+
+
 @st.cache_resource
 def get_supabase_client():
-    return create_client(
-        SUPABASE_URL,
-        SUPABASE_ANON_KEY,
-        options=ClientOptions(flow_type="pkce"),
-    )
+    url = _get_secret("SUPABASE_URL")
+    key = _get_secret("SUPABASE_ANON_KEY")
+    if not url or not key:
+        return None
+    try:
+        return create_client(
+            url,
+            key,
+            options=ClientOptions(flow_type="pkce"),
+        )
+    except Exception:
+        return None
 
 
 @st.cache_resource
@@ -46,9 +57,35 @@ def get_token_orcid_publico():
     return obter_token_publico_orcid()
 
 
+st.set_page_config(page_title="Rede de Materiais", page_icon="🧪", layout="centered")
+
 supabase = get_supabase_client()
 
-st.set_page_config(page_title="Rede de Materiais", page_icon="🧪", layout="centered")
+
+def url_publica() -> str:
+    """Origem atual (local ou Cloud). Não depende de memória do processo."""
+    atual = getattr(st.context, "url", None)
+    if atual:
+        partes = urlparse(atual)
+        if partes.scheme and partes.netloc:
+            return f"{partes.scheme}://{partes.netloc}"
+    return _get_secret("REDIRECT_URL", "http://localhost:8502") or "http://localhost:8502"
+
+
+def montar_url_login_orcid() -> str:
+    """PKCE com verifier na URL de retorno — sobrevive se o Streamlit reiniciar no meio do login."""
+    url_supabase = _get_secret("SUPABASE_URL")
+    if not url_supabase:
+        raise RuntimeError("SUPABASE_URL ausente")
+    verifier = generate_pkce_verifier()
+    destino = f"{url_publica()}/?cv={verifier}"
+    params = {
+        "provider": "custom:orcid",
+        "redirect_to": destino,
+        "code_challenge": generate_pkce_challenge(verifier),
+        "code_challenge_method": "s256",
+    }
+    return f"{url_supabase.rstrip('/')}/auth/v1/authorize?{urlencode(params)}"
 
 
 def idx_selectbox(opcoes, valor):
@@ -60,7 +97,7 @@ def idx_selectbox(opcoes, valor):
 def cabecalho_institucional():
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.image("assets/logo_gddm.png", use_container_width=True)
+        st.image("assets/logo_gddm.png", width="stretch")
 
     st.markdown(
         """
@@ -87,24 +124,44 @@ def fazer_login():
     st.title("🧪 Rede de Materiais")
     st.caption("Entre com seu ORCID para cadastrar materiais.")
 
-    if "auth_url" not in st.session_state:
-        auth_url, _ = supabase.auth._get_url_for_provider(
-            f"{supabase.auth._url}/authorize",
-            "custom:orcid",
-            {"redirect_to": REDIRECT_URL},
-        )
-        st.session_state["auth_url"] = auth_url
-
-    st.link_button("Entrar com ORCID", st.session_state["auth_url"])
+    try:
+        st.link_button("Entrar com ORCID", montar_url_login_orcid())
+    except Exception as e:
+        st.error(f"Não consegui gerar o login ORCID/Supabase: {e}")
+        if st.button("Tentar novamente"):
+            st.rerun()
 
 
 def processar_callback():
+    erro_oauth = st.query_params.get("error_description") or st.query_params.get("error")
+    if erro_oauth and not st.query_params.get("code"):
+        st.session_state.pop("auth_url", None)
+        st.error(f"ORCID/Supabase recusou o login: {erro_oauth}")
+        if st.button("Tentar login novamente"):
+            st.query_params.clear()
+            st.rerun()
+        return True
+
     code = st.query_params.get("code")
     if not code:
         return False
 
+    verifier = st.query_params.get("cv")
+    if not verifier:
+        st.query_params.clear()
+        st.error("O retorno do login chegou sem o verificador PKCE. Clique em Entrar com ORCID de novo.")
+        if st.button("Tentar login novamente"):
+            st.rerun()
+        return True
+
     try:
-        result = supabase.auth.exchange_code_for_session({"auth_code": code})
+        result = supabase.auth.exchange_code_for_session({
+            "auth_code": code,
+            "code_verifier": verifier,
+            "redirect_to": f"{url_publica()}/?cv={verifier}",
+        })
+        if not result.session:
+            raise RuntimeError("Supabase não devolveu sessão após o ORCID.")
         st.session_state["access_token"] = result.session.access_token
         st.session_state["refresh_token"] = result.session.refresh_token
 
@@ -136,27 +193,37 @@ def processar_callback():
     return True
 
 
+def encerrar_sessao():
+    st.session_state.pop("access_token", None)
+    st.session_state.pop("refresh_token", None)
+    st.session_state.pop("auth_url", None)
+    try:
+        supabase.auth.sign_out()
+    except Exception:
+        pass
+
+
 def get_professor_logado():
-    supabase.auth.set_session(
-        st.session_state["access_token"],
-        st.session_state["refresh_token"],
-    )
-    user = supabase.auth.get_user().user
-    professor = (
-        supabase.table("professores")
-        .select("id, nome, email, orcid_id")
-        .eq("user_id", user.id)
-        .single()
-        .execute()
-    )
-    professor = (
-        supabase.table("professores")
-        .select("id, nome, email, orcid_id, aprovado")
-        .eq("user_id", user.id)
-        .single()
-        .execute()
-    )
-    return professor.data
+    try:
+        supabase.auth.set_session(
+            st.session_state["access_token"],
+            st.session_state["refresh_token"],
+        )
+        user = supabase.auth.get_user().user
+        if not user:
+            encerrar_sessao()
+            return None
+        professor = (
+            supabase.table("professores")
+            .select("id, nome, email, orcid_id, aprovado")
+            .eq("user_id", user.id)
+            .single()
+            .execute()
+        )
+        return professor.data
+    except Exception:
+        encerrar_sessao()
+        return None
 
 
 def executar_extracao_por_doi(doi):
@@ -245,7 +312,7 @@ def formulario_material(professor):
         st.caption(f"Logado como {professor['nome'] or professor['email'] or 'professor'}")
     with col_b:
         if st.button("Sair"):
-            supabase.auth.sign_out()
+            encerrar_sessao()
             st.session_state.clear()
             st.rerun()
 
@@ -336,39 +403,43 @@ def formulario_material(professor):
                 st.error("Selecione o sistema cristalino.")
                 return
 
-            material = supabase.table("materiais").insert({
-                "professor_id": professor["id"],
-                "formula": formula.strip(),
-                "nome_comum": nome_comum.strip() or None,
-                "sistema_cristalino": sistema_cristalino,
-                "grupo_espacial": grupo_espacial.strip() or None,
-                "familia_estrutural": familia_estrutural.strip() or None,
-                "aplicacao_alvo": aplicacao_alvo.strip() or None,
-                "dopante": dopante.strip() or None,
-                "percentual_dopagem": percentual_dopagem or None,
-            }).execute()
-
-            material_id = material.data[0]["id"]
-
-            if a or b or c:
-                supabase.table("parametros_rede").insert({
-                    "material_id": material_id,
-                    "a": a or None, "b": b or None, "c": c or None,
-                    "alpha": alpha, "beta": beta, "gamma": gamma,
-                    "tecnica_medicao": None if tecnica_medicao == "Selecione..." else tecnica_medicao,
+            try:
+                material = supabase.table("materiais").insert({
+                    "professor_id": professor["id"],
+                    "formula": formula.strip(),
+                    "nome_comum": nome_comum.strip() or None,
+                    "sistema_cristalino": sistema_cristalino,
+                    "grupo_espacial": grupo_espacial.strip() or None,
+                    "familia_estrutural": familia_estrutural.strip() or None,
+                    "aplicacao_alvo": aplicacao_alvo.strip() or None,
+                    "dopante": dopante.strip() or None,
+                    "percentual_dopagem": percentual_dopagem or None,
                 }).execute()
 
-            if metodo_sintese.strip() or precursores.strip():
-                supabase.table("rota_sintese").insert({
-                    "material_id": material_id,
-                    "metodo": metodo_sintese.strip() or None,
-                    "precursores": precursores.strip() or None,
-                    "temp_calcinacao": temp_calcinacao or None,
-                    "tempo_calcinacao": tempo_calcinacao or None,
-                    "taxa_aquecimento": taxa_aquecimento or None,
-                    "taxa_resfriamento": taxa_resfriamento or None,
-                    "atmosfera": None if atmosfera == "Selecione..." else atmosfera,
-                }).execute()
+                material_id = material.data[0]["id"]
+
+                if a or b or c:
+                    supabase.table("parametros_rede").insert({
+                        "material_id": material_id,
+                        "a": a or None, "b": b or None, "c": c or None,
+                        "alpha": alpha, "beta": beta, "gamma": gamma,
+                        "tecnica_medicao": None if tecnica_medicao == "Selecione..." else tecnica_medicao,
+                    }).execute()
+
+                if metodo_sintese.strip() or precursores.strip():
+                    supabase.table("rota_sintese").insert({
+                        "material_id": material_id,
+                        "metodo": metodo_sintese.strip() or None,
+                        "precursores": precursores.strip() or None,
+                        "temp_calcinacao": temp_calcinacao or None,
+                        "tempo_calcinacao": tempo_calcinacao or None,
+                        "taxa_aquecimento": taxa_aquecimento or None,
+                        "taxa_resfriamento": taxa_resfriamento or None,
+                        "atmosfera": None if atmosfera == "Selecione..." else atmosfera,
+                    }).execute()
+            except Exception as e:
+                st.error(f"Erro ao salvar no Supabase: {e}")
+                return
 
             if "extraido" in st.session_state:
                 del st.session_state["extraido"]
@@ -378,28 +449,43 @@ def formulario_material(professor):
     st.divider()
     st.subheader("Materiais cadastrados (todos os professores)")
 
-    materiais = (
-        supabase.table("materiais")
-        .select("formula, nome_comum, sistema_cristalino, grupo_espacial, criado_em")
-        .order("criado_em", desc=True)
-        .execute()
+    try:
+        materiais = (
+            supabase.table("materiais")
+            .select("formula, nome_comum, sistema_cristalino, grupo_espacial, criado_em")
+            .order("criado_em", desc=True)
+            .execute()
+        )
+        if materiais.data:
+            st.dataframe(materiais.data, hide_index=True, width="stretch")
+        else:
+            st.info("Nenhum material cadastrado ainda.")
+    except Exception as e:
+        st.warning(f"Não consegui listar os materiais no Supabase: {e}")
+
+
+# ---------- Roteamento principal ----------
+
+if supabase is None:
+    cabecalho_institucional()
+    st.title("🧪 Rede de Materiais")
+    st.error(
+        "Não foi possível conectar ao Supabase. "
+        "Confira SUPABASE_URL e SUPABASE_ANON_KEY no .env (local) "
+        "ou nos secrets do Streamlit Cloud."
     )
-    if materiais.data:
-        st.dataframe(materiais.data, hide_index=True, use_container_width=True)
-    else:
-        st.info("Nenhum material cadastrado ainda.")
-
-
-# ---------- Roteamento principal ----------
-
-# ---------- Roteamento principal ----------
+    st.stop()
 
 if processar_callback():
     st.stop()
 
 if "access_token" in st.session_state:
     professor = get_professor_logado()
-    formulario_material(professor)
+    if professor:
+        formulario_material(professor)
+    else:
+        st.warning("Sessão expirada ou inválida. Entre novamente com o ORCID.")
+        fazer_login()
 else:
     fazer_login()
 

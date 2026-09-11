@@ -1,0 +1,15 @@
+[Unit]
+Description=Rede de Materiais (Streamlit + Supabase)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/anuar/projetos/consciencia-materiais
+Environment=STREAMLIT_SERVER_HEADLESS=true
+ExecStart=/home/anuar/projetos/consciencia-materiais/.venv/bin/streamlit run app.py --server.headless true --server.port 8502 --server.address 0.0.0.0 --server.fileWatcherType poll --browser.gatherUsageStats false
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
