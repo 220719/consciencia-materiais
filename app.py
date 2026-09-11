@@ -1,4 +1,3 @@
-import json
 import os
 from urllib.parse import urlencode, urlparse
 
@@ -8,7 +7,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import streamlit as st
-import streamlit.components.v1 as components
 from supabase import create_client, ClientOptions
 from supabase_auth.helpers import generate_pkce_challenge, generate_pkce_verifier
 
@@ -109,13 +107,6 @@ def montar_url_login_orcid() -> str:
     return f"{url_supabase.rstrip('/')}/auth/v1/authorize?{urlencode(params)}"
 
 
-def ir_para(url: str):
-    components.html(
-        f"<script>window.top.location.href = {json.dumps(url)};</script>",
-        height=0,
-    )
-
-
 def idx_selectbox(opcoes, valor):
     if valor and valor in opcoes:
         return opcoes.index(valor)
@@ -175,8 +166,7 @@ def fazer_login():
         return
 
     try:
-        if st.button("Entrar com ORCID", type="primary"):
-            ir_para(montar_url_login_orcid())
+        st.link_button("Entrar com ORCID", montar_url_login_orcid(), type="primary")
     except Exception as e:
         st.error(f"Não consegui gerar o login ORCID/Supabase: {e}")
         if st.button("Tentar novamente"):
