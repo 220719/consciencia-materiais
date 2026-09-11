@@ -367,6 +367,370 @@ def secao_extracao_automatica(professor):
                                     st.error(f"Erro na extração: {e}")
 
 
+def coletar_campos_material(prefix: str, extraido: dict, pr: dict, rs: dict) -> dict:
+    st.markdown("**Dados essenciais**")
+    col1, col2 = st.columns(2)
+    with col1:
+        formula = st.text_input(
+            "Fórmula química *",
+            value=extraido.get("formula") or "",
+            placeholder="Ex: Bi0.9Nd0.1FeO3",
+            key=f"{prefix}_formula",
+        )
+        nome_comum = st.text_input(
+            "Nome comum (opcional)",
+            value=extraido.get("nome_comum") or "",
+            key=f"{prefix}_nome",
+        )
+        sistema_cristalino = st.selectbox(
+            "Sistema cristalino",
+            SISTEMAS_CRISTALINOS,
+            index=idx_selectbox(SISTEMAS_CRISTALINOS, extraido.get("sistema_cristalino")),
+            key=f"{prefix}_sistema",
+        )
+        grupo_espacial = st.text_input(
+            "Grupo espacial",
+            value=extraido.get("grupo_espacial") or "",
+            placeholder="Ex: R3c",
+            key=f"{prefix}_grupo",
+        )
+    with col2:
+        a = st.number_input("a (Å)", min_value=0.0, value=_numero(pr.get("a")), format="%.4f", key=f"{prefix}_a")
+        b = st.number_input("b (Å)", min_value=0.0, value=_numero(pr.get("b")), format="%.4f", key=f"{prefix}_b")
+        c = st.number_input("c (Å)", min_value=0.0, value=_numero(pr.get("c")), format="%.4f", key=f"{prefix}_c")
+        alpha = st.number_input("α (°)", min_value=0.0, max_value=180.0, value=_numero(pr.get("alpha"), 90.0), format="%.2f", key=f"{prefix}_alpha")
+        beta = st.number_input("β (°)", min_value=0.0, max_value=180.0, value=_numero(pr.get("beta"), 90.0), format="%.2f", key=f"{prefix}_beta")
+        gamma = st.number_input("γ (°)", min_value=0.0, max_value=180.0, value=_numero(pr.get("gamma"), 90.0), format="%.2f", key=f"{prefix}_gamma")
+
+    tecnica_medicao = st.selectbox(
+        "Técnica de medição dos parâmetros de rede",
+        TECNICAS_MEDICAO,
+        index=idx_selectbox(TECNICAS_MEDICAO, pr.get("tecnica_medicao")),
+        key=f"{prefix}_tecnica",
+    )
+    metodo_sintese = st.text_input(
+        "Rota de síntese (resumo)",
+        value=rs.get("metodo") or "",
+        placeholder="Ex: Reação de estado sólido",
+        key=f"{prefix}_metodo",
+    )
+
+    with st.expander("+ Mais detalhes do material"):
+        familia_estrutural = st.text_input(
+            "Família estrutural",
+            value=extraido.get("familia_estrutural") or "",
+            placeholder="Ex: Perovskita",
+            key=f"{prefix}_familia",
+        )
+        aplicacao_alvo = st.text_input(
+            "Aplicação-alvo",
+            value=extraido.get("aplicacao_alvo") or "",
+            placeholder="Ex: Multiferróico",
+            key=f"{prefix}_aplicacao",
+        )
+        col3, col4 = st.columns(2)
+        with col3:
+            dopante = st.text_input("Dopante", value=extraido.get("dopante") or "", placeholder="Ex: Nd", key=f"{prefix}_dopante")
+        with col4:
+            percentual_dopagem = st.number_input(
+                "Percentual de dopagem (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=_numero(extraido.get("percentual_dopagem")),
+                format="%.2f",
+                key=f"{prefix}_dopagem",
+            )
+
+    with st.expander("+ Mais detalhes da síntese"):
+        precursores = st.text_area(
+            "Precursores",
+            value=rs.get("precursores") or "",
+            placeholder="Ex: Bi2O3, Nd2O3, Fe2O3",
+            key=f"{prefix}_precursores",
+        )
+        col5, col6 = st.columns(2)
+        with col5:
+            temp_calcinacao = st.number_input(
+                "Temperatura de calcinação (°C)", min_value=0.0,
+                value=_numero(rs.get("temp_calcinacao")), format="%.1f", key=f"{prefix}_tcal",
+            )
+            taxa_aquecimento = st.number_input(
+                "Taxa de aquecimento (°C/min)", min_value=0.0,
+                value=_numero(rs.get("taxa_aquecimento")), format="%.2f", key=f"{prefix}_taq",
+            )
+            atmosfera = st.selectbox(
+                "Atmosfera", ATMOSFERAS,
+                index=idx_selectbox(ATMOSFERAS, rs.get("atmosfera")),
+                key=f"{prefix}_atm",
+            )
+        with col6:
+            tempo_calcinacao = st.number_input(
+                "Tempo de calcinação (h)", min_value=0.0,
+                value=_numero(rs.get("tempo_calcinacao")), format="%.1f", key=f"{prefix}_hcal",
+            )
+            taxa_resfriamento = st.number_input(
+                "Taxa de resfriamento (°C/min)", min_value=0.0,
+                value=_numero(rs.get("taxa_resfriamento")), format="%.2f", key=f"{prefix}_tres",
+            )
+
+    return {
+        "formula": formula.strip(),
+        "nome_comum": nome_comum.strip() or None,
+        "sistema_cristalino": sistema_cristalino,
+        "grupo_espacial": grupo_espacial.strip() or None,
+        "familia_estrutural": familia_estrutural.strip() or None,
+        "aplicacao_alvo": aplicacao_alvo.strip() or None,
+        "dopante": dopante.strip() or None,
+        "percentual_dopagem": percentual_dopagem or None,
+        "a": a or None, "b": b or None, "c": c or None,
+        "alpha": alpha, "beta": beta, "gamma": gamma,
+        "tecnica_medicao": None if tecnica_medicao == "Selecione..." else tecnica_medicao,
+        "metodo": metodo_sintese.strip() or None,
+        "precursores": precursores.strip() or None,
+        "temp_calcinacao": temp_calcinacao or None,
+        "tempo_calcinacao": tempo_calcinacao or None,
+        "taxa_aquecimento": taxa_aquecimento or None,
+        "taxa_resfriamento": taxa_resfriamento or None,
+        "atmosfera": None if atmosfera == "Selecione..." else atmosfera,
+    }
+
+
+def validar_campos_material(campos: dict) -> str | None:
+    if not campos["formula"]:
+        return "A fórmula química é obrigatória."
+    if campos["sistema_cristalino"] == "Selecione...":
+        return "Selecione o sistema cristalino."
+    return None
+
+
+def dados_tabela_material(professor_id, campos: dict) -> dict:
+    return {
+        "professor_id": professor_id,
+        "formula": campos["formula"],
+        "nome_comum": campos["nome_comum"],
+        "sistema_cristalino": campos["sistema_cristalino"],
+        "grupo_espacial": campos["grupo_espacial"],
+        "familia_estrutural": campos["familia_estrutural"],
+        "aplicacao_alvo": campos["aplicacao_alvo"],
+        "dopante": campos["dopante"],
+        "percentual_dopagem": campos["percentual_dopagem"],
+    }
+
+
+def gravar_filhos_material(client, material_id, campos: dict):
+    rede = {"a": campos["a"], "b": campos["b"], "c": campos["c"],
+            "alpha": campos["alpha"], "beta": campos["beta"], "gamma": campos["gamma"],
+            "tecnica_medicao": campos["tecnica_medicao"]}
+    existente_pr = (
+        client.table("parametros_rede").select("id").eq("material_id", material_id).limit(1).execute()
+    )
+    if campos["a"] or campos["b"] or campos["c"] or existente_pr.data:
+        if existente_pr.data:
+            client.table("parametros_rede").update(rede).eq("id", existente_pr.data[0]["id"]).execute()
+        else:
+            client.table("parametros_rede").insert({"material_id": material_id, **rede}).execute()
+
+    rota = {
+        "metodo": campos["metodo"],
+        "precursores": campos["precursores"],
+        "temp_calcinacao": campos["temp_calcinacao"],
+        "tempo_calcinacao": campos["tempo_calcinacao"],
+        "taxa_aquecimento": campos["taxa_aquecimento"],
+        "taxa_resfriamento": campos["taxa_resfriamento"],
+        "atmosfera": campos["atmosfera"],
+    }
+    existente_rs = (
+        client.table("rota_sintese").select("id").eq("material_id", material_id).limit(1).execute()
+    )
+    tem_rota = campos["metodo"] or campos["precursores"]
+    if tem_rota or existente_rs.data:
+        if existente_rs.data:
+            client.table("rota_sintese").update(rota).eq("id", existente_rs.data[0]["id"]).execute()
+        elif tem_rota:
+            client.table("rota_sintese").insert({"material_id": material_id, **rota}).execute()
+
+
+def listar_materiais(client) -> list[dict]:
+    try:
+        resp = (
+            client.table("materiais")
+            .select(
+                "id, professor_id, formula, nome_comum, sistema_cristalino, "
+                "grupo_espacial, criado_em, professores(nome, email)"
+            )
+            .order("criado_em", desc=True)
+            .execute()
+        )
+        linhas = []
+        for m in resp.data or []:
+            prof = m.get("professores") or {}
+            if isinstance(prof, list):
+                prof = prof[0] if prof else {}
+            linhas.append({
+                "id": m["id"],
+                "professor_id": m["professor_id"],
+                "formula": m.get("formula"),
+                "nome_comum": m.get("nome_comum"),
+                "sistema_cristalino": m.get("sistema_cristalino"),
+                "grupo_espacial": m.get("grupo_espacial"),
+                "criado_em": m.get("criado_em"),
+                "professor": (prof or {}).get("nome") or (prof or {}).get("email") or "—",
+            })
+        return linhas
+    except Exception:
+        resp = (
+            client.table("materiais")
+            .select("id, professor_id, formula, nome_comum, sistema_cristalino, grupo_espacial, criado_em")
+            .order("criado_em", desc=True)
+            .execute()
+        )
+        return [{**m, "professor": "—"} for m in (resp.data or [])]
+
+
+def carregar_material_completo(client, material_id, professor_id) -> dict | None:
+    mat = (
+        client.table("materiais")
+        .select("*")
+        .eq("id", material_id)
+        .eq("professor_id", professor_id)
+        .single()
+        .execute()
+    )
+    if not mat.data:
+        return None
+    pr = client.table("parametros_rede").select("*").eq("material_id", material_id).limit(1).execute()
+    rs = client.table("rota_sintese").select("*").eq("material_id", material_id).limit(1).execute()
+    return {
+        "material": mat.data,
+        "parametros_rede": (pr.data or [{}])[0],
+        "rota_sintese": (rs.data or [{}])[0],
+    }
+
+
+def excluir_material(client, material_id, professor_id):
+    dono = (
+        client.table("materiais")
+        .select("id")
+        .eq("id", material_id)
+        .eq("professor_id", professor_id)
+        .execute()
+    )
+    if not dono.data:
+        raise PermissionError("Este material não é seu.")
+    for tabela in ("parametros_rede", "rota_sintese", "caracterizacoes", "propriedades_fisicas", "publicacoes"):
+        try:
+            client.table(tabela).delete().eq("material_id", material_id).execute()
+        except Exception:
+            pass
+    client.table("materiais").delete().eq("id", material_id).eq("professor_id", professor_id).execute()
+
+
+def secao_acervo(client, professor):
+    st.subheader("Materiais cadastrados")
+    try:
+        linhas = listar_materiais(client)
+    except Exception as e:
+        st.warning(f"Não consegui listar os materiais no Supabase: {e}")
+        return []
+
+    if not linhas:
+        st.info("Nenhum material cadastrado ainda.")
+        return []
+
+    col_f, col_s, col_p = st.columns(3)
+    with col_f:
+        termo = st.text_input("Buscar fórmula / nome / grupo", key="filtro_texto")
+    with col_s:
+        sistemas = ["Todos"] + sorted({m.get("sistema_cristalino") for m in linhas if m.get("sistema_cristalino")})
+        sistema = st.selectbox("Sistema cristalino", sistemas, key="filtro_sistema")
+    with col_p:
+        professores = ["Todos"] + sorted({m.get("professor") for m in linhas if m.get("professor") and m.get("professor") != "—"})
+        autor = st.selectbox("Professor", professores, key="filtro_professor")
+
+    filtradas = linhas
+    if termo.strip():
+        q = termo.strip().lower()
+        filtradas = [
+            m for m in filtradas
+            if q in (m.get("formula") or "").lower()
+            or q in (m.get("nome_comum") or "").lower()
+            or q in (m.get("grupo_espacial") or "").lower()
+        ]
+    if sistema != "Todos":
+        filtradas = [m for m in filtradas if m.get("sistema_cristalino") == sistema]
+    if autor != "Todos":
+        filtradas = [m for m in filtradas if m.get("professor") == autor]
+
+    st.caption(f"{len(filtradas)} de {len(linhas)} material(is)")
+    visivel = [
+        {
+            "Fórmula": m.get("formula"),
+            "Nome": m.get("nome_comum"),
+            "Sistema": m.get("sistema_cristalino"),
+            "Grupo": m.get("grupo_espacial"),
+            "Professor": m.get("professor"),
+            "Criado em": m.get("criado_em"),
+        }
+        for m in filtradas
+    ]
+    st.dataframe(visivel, hide_index=True, width="stretch")
+    return linhas
+
+
+def secao_meus_materiais(client, professor, linhas: list[dict]):
+    meus = [m for m in linhas if m.get("professor_id") == professor["id"]]
+    st.subheader("Meus materiais")
+    if not meus:
+        st.caption("Você ainda não cadastrou nenhum material.")
+        return
+
+    rotulos = {
+        f"{m.get('formula') or '(sem fórmula)'} — {(m.get('criado_em') or '')[:10]}": m["id"]
+        for m in meus
+    }
+    escolha = st.selectbox("Selecione um material seu", list(rotulos.keys()), key="meu_material")
+    material_id = rotulos[escolha]
+    completo = carregar_material_completo(client, material_id, professor["id"])
+    if not completo:
+        st.error("Não encontrei esse material (ele não é seu ou foi apagado).")
+        return
+
+    with st.form(f"form_editar_{material_id}"):
+        campos = coletar_campos_material(
+            f"edit_{material_id}",
+            completo["material"],
+            completo["parametros_rede"],
+            completo["rota_sintese"],
+        )
+        salvar = st.form_submit_button("Salvar alterações")
+        if salvar:
+            erro = validar_campos_material(campos)
+            if erro:
+                st.error(erro)
+            else:
+                try:
+                    client.table("materiais").update(
+                        dados_tabela_material(professor["id"], campos)
+                    ).eq("id", material_id).eq("professor_id", professor["id"]).execute()
+                    gravar_filhos_material(client, material_id, campos)
+                    st.success("Material atualizado.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao atualizar: {e}")
+
+    confirmar = st.checkbox("Confirmo que quero excluir este material", key=f"del_ok_{material_id}")
+    if st.button("Excluir material", type="secondary", key=f"del_btn_{material_id}"):
+        if not confirmar:
+            st.warning("Marque a confirmação antes de excluir.")
+        else:
+            try:
+                excluir_material(client, material_id, professor["id"])
+                st.success("Material excluído.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao excluir: {e}")
+
+
 def formulario_material(professor):
     st.title("🧪 Rede de Materiais")
     col_a, col_b = st.columns([4, 1])
@@ -397,72 +761,13 @@ def formulario_material(professor):
                 st.rerun()
 
     with st.form("form_material", clear_on_submit=True):
-        st.markdown("**Dados essenciais**")
-
-        col1, col2 = st.columns(2)
-        with col1:
-            formula = st.text_input("Fórmula química *", value=extraido.get("formula") or "",
-                                     placeholder="Ex: Bi0.9Nd0.1FeO3")
-            nome_comum = st.text_input("Nome comum (opcional)", value=extraido.get("nome_comum") or "")
-            sistema_cristalino = st.selectbox(
-                "Sistema cristalino", SISTEMAS_CRISTALINOS,
-                index=idx_selectbox(SISTEMAS_CRISTALINOS, extraido.get("sistema_cristalino")),
-            )
-            grupo_espacial = st.text_input("Grupo espacial", value=extraido.get("grupo_espacial") or "",
-                                            placeholder="Ex: R3c")
-
-        with col2:
-            a = st.number_input("a (Å)", min_value=0.0, value=_numero(pr.get("a")), format="%.4f")
-            b = st.number_input("b (Å)", min_value=0.0, value=_numero(pr.get("b")), format="%.4f")
-            c = st.number_input("c (Å)", min_value=0.0, value=_numero(pr.get("c")), format="%.4f")
-            alpha = st.number_input("α (°)", min_value=0.0, max_value=180.0, value=_numero(pr.get("alpha"), 90.0), format="%.2f")
-            beta = st.number_input("β (°)", min_value=0.0, max_value=180.0, value=_numero(pr.get("beta"), 90.0), format="%.2f")
-            gamma = st.number_input("γ (°)", min_value=0.0, max_value=180.0, value=_numero(pr.get("gamma"), 90.0), format="%.2f")
-
-        tecnica_medicao = st.selectbox(
-            "Técnica de medição dos parâmetros de rede", TECNICAS_MEDICAO,
-            index=idx_selectbox(TECNICAS_MEDICAO, pr.get("tecnica_medicao")),
-        )
-
-        metodo_sintese = st.text_input("Rota de síntese (resumo)", value=rs.get("metodo") or "",
-                                        placeholder="Ex: Reação de estado sólido")
-
-        with st.expander("+ Mais detalhes do material"):
-            familia_estrutural = st.text_input("Família estrutural", value=extraido.get("familia_estrutural") or "",
-                                                placeholder="Ex: Perovskita")
-            aplicacao_alvo = st.text_input("Aplicação-alvo", value=extraido.get("aplicacao_alvo") or "",
-                                            placeholder="Ex: Multiferróico")
-            col3, col4 = st.columns(2)
-            with col3:
-                dopante = st.text_input("Dopante", value=extraido.get("dopante") or "", placeholder="Ex: Nd")
-            with col4:
-                percentual_dopagem = st.number_input(
-                    "Percentual de dopagem (%)", min_value=0.0, max_value=100.0,
-                    value=_numero(extraido.get("percentual_dopagem")), format="%.2f",
-                )
-
-        with st.expander("+ Mais detalhes da síntese"):
-            precursores = st.text_area("Precursores", value=rs.get("precursores") or "",
-                                        placeholder="Ex: Bi2O3, Nd2O3, Fe2O3")
-            col5, col6 = st.columns(2)
-            with col5:
-                temp_calcinacao = st.number_input("Temperatura de calcinação (°C)", min_value=0.0,
-                                                   value=_numero(rs.get("temp_calcinacao")), format="%.1f")
-                taxa_aquecimento = st.number_input("Taxa de aquecimento (°C/min)", min_value=0.0, format="%.2f")
-                atmosfera = st.selectbox("Atmosfera", ATMOSFERAS, index=idx_selectbox(ATMOSFERAS, rs.get("atmosfera")))
-            with col6:
-                tempo_calcinacao = st.number_input("Tempo de calcinação (h)", min_value=0.0,
-                                                     value=_numero(rs.get("tempo_calcinacao")), format="%.1f")
-                taxa_resfriamento = st.number_input("Taxa de resfriamento (°C/min)", min_value=0.0, format="%.2f")
-
+        campos = coletar_campos_material("novo", extraido, pr, rs)
         enviado = st.form_submit_button("Salvar material")
 
         if enviado:
-            if not formula.strip():
-                st.error("A fórmula química é obrigatória.")
-                return
-            if sistema_cristalino == "Selecione...":
-                st.error("Selecione o sistema cristalino.")
+            erro = validar_campos_material(campos)
+            if erro:
+                st.error(erro)
                 return
 
             client = cliente_da_sessao()
@@ -470,67 +775,28 @@ def formulario_material(professor):
                 st.error("Sessão inválida. Entre novamente com o ORCID.")
                 return
             try:
-                material = client.table("materiais").insert({
-                    "professor_id": professor["id"],
-                    "formula": formula.strip(),
-                    "nome_comum": nome_comum.strip() or None,
-                    "sistema_cristalino": sistema_cristalino,
-                    "grupo_espacial": grupo_espacial.strip() or None,
-                    "familia_estrutural": familia_estrutural.strip() or None,
-                    "aplicacao_alvo": aplicacao_alvo.strip() or None,
-                    "dopante": dopante.strip() or None,
-                    "percentual_dopagem": percentual_dopagem or None,
-                }).execute()
-
+                material = client.table("materiais").insert(
+                    dados_tabela_material(professor["id"], campos)
+                ).execute()
                 material_id = material.data[0]["id"]
-
-                if a or b or c:
-                    client.table("parametros_rede").insert({
-                        "material_id": material_id,
-                        "a": a or None, "b": b or None, "c": c or None,
-                        "alpha": alpha, "beta": beta, "gamma": gamma,
-                        "tecnica_medicao": None if tecnica_medicao == "Selecione..." else tecnica_medicao,
-                    }).execute()
-
-                if metodo_sintese.strip() or precursores.strip():
-                    client.table("rota_sintese").insert({
-                        "material_id": material_id,
-                        "metodo": metodo_sintese.strip() or None,
-                        "precursores": precursores.strip() or None,
-                        "temp_calcinacao": temp_calcinacao or None,
-                        "tempo_calcinacao": tempo_calcinacao or None,
-                        "taxa_aquecimento": taxa_aquecimento or None,
-                        "taxa_resfriamento": taxa_resfriamento or None,
-                        "atmosfera": None if atmosfera == "Selecione..." else atmosfera,
-                    }).execute()
+                gravar_filhos_material(client, material_id, campos)
             except Exception as e:
                 st.error(f"Erro ao salvar no Supabase: {e}")
                 return
 
             if "extraido" in st.session_state:
                 del st.session_state["extraido"]
-
-            st.success(f"Material '{formula}' salvo com sucesso!")
+            st.success(f"Material '{campos['formula']}' salvo com sucesso!")
+            st.rerun()
 
     st.divider()
-    st.subheader("Materiais cadastrados (todos os professores)")
-
-    try:
-        client = cliente_da_sessao()
-        if client is None:
-            raise RuntimeError("sessão inválida")
-        materiais = (
-            client.table("materiais")
-            .select("formula, nome_comum, sistema_cristalino, grupo_espacial, criado_em")
-            .order("criado_em", desc=True)
-            .execute()
-        )
-        if materiais.data:
-            st.dataframe(materiais.data, hide_index=True, width="stretch")
-        else:
-            st.info("Nenhum material cadastrado ainda.")
-    except Exception as e:
-        st.warning(f"Não consegui listar os materiais no Supabase: {e}")
+    client = cliente_da_sessao()
+    if client is None:
+        st.warning("Sessão inválida. Entre novamente com o ORCID.")
+        return
+    linhas = secao_acervo(client, professor)
+    st.divider()
+    secao_meus_materiais(client, professor, linhas)
 
 
 # ---------- Roteamento principal ----------
