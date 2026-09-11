@@ -92,17 +92,16 @@ def supabase_auth_acessivel(url: str) -> bool:
 
 
 def montar_url_login_orcid() -> str:
-    """PKCE com verifier no `state` (redirect limpo — o Cloud não corta query aninhada)."""
+    """PKCE próprio; o verifier vai em ?cv= no retorno. Não usar `state` — o ORCID/Supabase validam o deles."""
     url_supabase = _get_secret("SUPABASE_URL")
     if not url_supabase:
         raise RuntimeError("SUPABASE_URL ausente")
     verifier = generate_pkce_verifier()
     params = {
         "provider": "custom:orcid",
-        "redirect_to": f"{url_publica()}/",
+        "redirect_to": f"{url_publica()}/?cv={verifier}",
         "code_challenge": generate_pkce_challenge(verifier),
         "code_challenge_method": "s256",
-        "state": verifier,
     }
     return f"{url_supabase.rstrip('/')}/auth/v1/authorize?{urlencode(params)}"
 
@@ -187,7 +186,7 @@ def processar_callback():
     if not code:
         return False
 
-    verifier = st.query_params.get("state") or st.query_params.get("cv")
+    verifier = st.query_params.get("cv")
     if not verifier:
         st.query_params.clear()
         st.error("O retorno do login chegou sem o verificador PKCE. Clique em Entrar com ORCID de novo.")
@@ -196,10 +195,11 @@ def processar_callback():
         return True
 
     try:
+        destino = f"{url_publica()}/?cv={verifier}"
         result = supabase.auth.exchange_code_for_session({
             "auth_code": code,
             "code_verifier": verifier,
-            "redirect_to": f"{url_publica()}/",
+            "redirect_to": destino,
         })
         if not result.session:
             raise RuntimeError("Supabase não devolveu sessão após o ORCID.")
