@@ -63,6 +63,29 @@ st.set_page_config(page_title="Rede de Materiais", page_icon="🧪", layout="cen
 supabase = get_supabase_client()
 
 
+def _numero(valor, padrao=0.0) -> float:
+    try:
+        if valor is None or valor == "":
+            return float(padrao)
+        return float(valor)
+    except (TypeError, ValueError):
+        return float(padrao)
+
+
+def cliente_da_sessao():
+    """Cliente por rerun — set_session no client compartilhado vaza token entre usuários no Cloud."""
+    url = _get_secret("SUPABASE_URL")
+    key = _get_secret("SUPABASE_ANON_KEY")
+    if not url or not key:
+        return None
+    client = create_client(url, key, options=ClientOptions(flow_type="pkce"))
+    client.auth.set_session(
+        st.session_state["access_token"],
+        st.session_state["refresh_token"],
+    )
+    return client
+
+
 def url_publica() -> str:
     """Origem atual (local ou Cloud). Não depende de memória do processo."""
     atual = getattr(st.context, "url", None)
@@ -238,24 +261,22 @@ def encerrar_sessao():
     st.session_state.pop("access_token", None)
     st.session_state.pop("refresh_token", None)
     st.session_state.pop("auth_url", None)
-    try:
-        supabase.auth.sign_out()
-    except Exception:
-        pass
+    st.session_state.pop("extraido", None)
+    st.session_state.pop("publicacoes_orcid", None)
 
 
 def get_professor_logado():
     try:
-        supabase.auth.set_session(
-            st.session_state["access_token"],
-            st.session_state["refresh_token"],
-        )
-        user = supabase.auth.get_user().user
+        client = cliente_da_sessao()
+        if client is None:
+            encerrar_sessao()
+            return None
+        user = client.auth.get_user().user
         if not user:
             encerrar_sessao()
             return None
         professor = (
-            supabase.table("professores")
+            client.table("professores")
             .select("id, nome, email, orcid_id, aprovado")
             .eq("user_id", user.id)
             .single()
@@ -391,12 +412,12 @@ def formulario_material(professor):
                                             placeholder="Ex: R3c")
 
         with col2:
-            a = st.number_input("a (Å)", min_value=0.0, value=float(pr.get("a") or 0.0), format="%.4f")
-            b = st.number_input("b (Å)", min_value=0.0, value=float(pr.get("b") or 0.0), format="%.4f")
-            c = st.number_input("c (Å)", min_value=0.0, value=float(pr.get("c") or 0.0), format="%.4f")
-            alpha = st.number_input("α (°)", min_value=0.0, max_value=180.0, value=float(pr.get("alpha") or 90.0), format="%.2f")
-            beta = st.number_input("β (°)", min_value=0.0, max_value=180.0, value=float(pr.get("beta") or 90.0), format="%.2f")
-            gamma = st.number_input("γ (°)", min_value=0.0, max_value=180.0, value=float(pr.get("gamma") or 90.0), format="%.2f")
+            a = st.number_input("a (Å)", min_value=0.0, value=_numero(pr.get("a")), format="%.4f")
+            b = st.number_input("b (Å)", min_value=0.0, value=_numero(pr.get("b")), format="%.4f")
+            c = st.number_input("c (Å)", min_value=0.0, value=_numero(pr.get("c")), format="%.4f")
+            alpha = st.number_input("α (°)", min_value=0.0, max_value=180.0, value=_numero(pr.get("alpha"), 90.0), format="%.2f")
+            beta = st.number_input("β (°)", min_value=0.0, max_value=180.0, value=_numero(pr.get("beta"), 90.0), format="%.2f")
+            gamma = st.number_input("γ (°)", min_value=0.0, max_value=180.0, value=_numero(pr.get("gamma"), 90.0), format="%.2f")
 
         tecnica_medicao = st.selectbox(
             "Técnica de medição dos parâmetros de rede", TECNICAS_MEDICAO,
@@ -417,7 +438,7 @@ def formulario_material(professor):
             with col4:
                 percentual_dopagem = st.number_input(
                     "Percentual de dopagem (%)", min_value=0.0, max_value=100.0,
-                    value=float(extraido.get("percentual_dopagem") or 0.0), format="%.2f",
+                    value=_numero(extraido.get("percentual_dopagem")), format="%.2f",
                 )
 
         with st.expander("+ Mais detalhes da síntese"):
@@ -426,12 +447,12 @@ def formulario_material(professor):
             col5, col6 = st.columns(2)
             with col5:
                 temp_calcinacao = st.number_input("Temperatura de calcinação (°C)", min_value=0.0,
-                                                   value=float(rs.get("temp_calcinacao") or 0.0), format="%.1f")
+                                                   value=_numero(rs.get("temp_calcinacao")), format="%.1f")
                 taxa_aquecimento = st.number_input("Taxa de aquecimento (°C/min)", min_value=0.0, format="%.2f")
                 atmosfera = st.selectbox("Atmosfera", ATMOSFERAS, index=idx_selectbox(ATMOSFERAS, rs.get("atmosfera")))
             with col6:
                 tempo_calcinacao = st.number_input("Tempo de calcinação (h)", min_value=0.0,
-                                                     value=float(rs.get("tempo_calcinacao") or 0.0), format="%.1f")
+                                                     value=_numero(rs.get("tempo_calcinacao")), format="%.1f")
                 taxa_resfriamento = st.number_input("Taxa de resfriamento (°C/min)", min_value=0.0, format="%.2f")
 
         enviado = st.form_submit_button("Salvar material")
@@ -444,8 +465,12 @@ def formulario_material(professor):
                 st.error("Selecione o sistema cristalino.")
                 return
 
+            client = cliente_da_sessao()
+            if client is None:
+                st.error("Sessão inválida. Entre novamente com o ORCID.")
+                return
             try:
-                material = supabase.table("materiais").insert({
+                material = client.table("materiais").insert({
                     "professor_id": professor["id"],
                     "formula": formula.strip(),
                     "nome_comum": nome_comum.strip() or None,
@@ -460,7 +485,7 @@ def formulario_material(professor):
                 material_id = material.data[0]["id"]
 
                 if a or b or c:
-                    supabase.table("parametros_rede").insert({
+                    client.table("parametros_rede").insert({
                         "material_id": material_id,
                         "a": a or None, "b": b or None, "c": c or None,
                         "alpha": alpha, "beta": beta, "gamma": gamma,
@@ -468,7 +493,7 @@ def formulario_material(professor):
                     }).execute()
 
                 if metodo_sintese.strip() or precursores.strip():
-                    supabase.table("rota_sintese").insert({
+                    client.table("rota_sintese").insert({
                         "material_id": material_id,
                         "metodo": metodo_sintese.strip() or None,
                         "precursores": precursores.strip() or None,
@@ -491,8 +516,11 @@ def formulario_material(professor):
     st.subheader("Materiais cadastrados (todos os professores)")
 
     try:
+        client = cliente_da_sessao()
+        if client is None:
+            raise RuntimeError("sessão inválida")
         materiais = (
-            supabase.table("materiais")
+            client.table("materiais")
             .select("formula, nome_comum, sistema_cristalino, grupo_espacial, criado_em")
             .order("criado_em", desc=True)
             .execute()
@@ -522,7 +550,17 @@ if processar_callback():
 
 if "access_token" in st.session_state:
     professor = get_professor_logado()
-    if professor:
+    if professor and professor.get("aprovado") is False:
+        cabecalho_institucional()
+        st.title("🧪 Rede de Materiais")
+        st.info(
+            "Sua conta foi criada e aguarda aprovação. "
+            "Quando for liberada, você poderá cadastrar materiais."
+        )
+        if st.button("Sair"):
+            encerrar_sessao()
+            st.rerun()
+    elif professor:
         formulario_material(professor)
     else:
         st.warning("Sessão expirada ou inválida. Entre novamente com o ORCID.")

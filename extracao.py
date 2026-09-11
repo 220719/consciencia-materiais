@@ -10,10 +10,18 @@ import requests
 from anthropic import Anthropic
 from pypdf import PdfReader
 
-CROSSREF_EMAIL = os.environ.get("CROSSREF_EMAIL", "")
 CLAUDE_MODEL = "claude-sonnet-5"
-ORCID_CLIENT_ID = os.environ.get("ORCID_CLIENT_ID", "")
-ORCID_CLIENT_SECRET = os.environ.get("ORCID_CLIENT_SECRET", "")
+
+
+def _secret(name: str, default: str = "") -> str:
+    valor = os.environ.get(name)
+    if valor:
+        return valor
+    try:
+        import streamlit as st
+        return str(st.secrets[name])
+    except Exception:
+        return default
 
 
 def normalizar_doi(doi: str) -> str:
@@ -27,7 +35,8 @@ def normalizar_doi(doi: str) -> str:
 def buscar_metadados_crossref(doi: str) -> dict | None:
     doi = normalizar_doi(doi)
     url = f"https://api.crossref.org/works/{doi}"
-    params = {"mailto": CROSSREF_EMAIL} if CROSSREF_EMAIL else {}
+    email = _secret("CROSSREF_EMAIL")
+    params = {"mailto": email} if email else {}
     resp = requests.get(url, params=params, timeout=15)
     if resp.status_code != 200:
         return None
@@ -54,10 +63,11 @@ def buscar_metadados_crossref(doi: str) -> dict | None:
 
 def listar_locais_openaccess(doi: str) -> list[str]:
     doi = normalizar_doi(doi)
-    if not CROSSREF_EMAIL:
-        raise ValueError("CROSSREF_EMAIL precisa estar definido no .env.")
+    email = _secret("CROSSREF_EMAIL")
+    if not email:
+        raise ValueError("CROSSREF_EMAIL precisa estar definido no .env ou nos secrets.")
     url = f"https://api.unpaywall.org/v2/{doi}"
-    resp = requests.get(url, params={"email": CROSSREF_EMAIL}, timeout=15)
+    resp = requests.get(url, params={"email": email}, timeout=15)
     if resp.status_code != 200:
         return []
 
@@ -83,7 +93,8 @@ def baixar_texto_pdf(pdf_url: str) -> str | None:
     headers = {"User-Agent": "Mozilla/5.0 (compatible; ConsciênciaDeMateriais/1.0)"}
     resp = requests.get(pdf_url, headers=headers, timeout=30, allow_redirects=True)
     content_type = resp.headers.get("Content-Type", "")
-    if resp.status_code != 200 or "pdf" not in content_type.lower():
+    parece_pdf = "pdf" in content_type.lower() or resp.content.startswith(b"%PDF")
+    if resp.status_code != 200 or not parece_pdf:
         return None
     return texto_de_pdf_bytes(resp.content)
 
@@ -183,8 +194,8 @@ def obter_token_publico_orcid() -> str:
     resp = requests.post(
         "https://orcid.org/oauth/token",
         data={
-            "client_id": ORCID_CLIENT_ID,
-            "client_secret": ORCID_CLIENT_SECRET,
+            "client_id": _secret("ORCID_CLIENT_ID"),
+            "client_secret": _secret("ORCID_CLIENT_SECRET"),
             "grant_type": "client_credentials",
             "scope": "/read-public",
         },
