@@ -587,55 +587,17 @@ def listar_materiais(client) -> list[dict]:
         return [{**m, "professor": "—"} for m in (resp.data or [])]
 
 
-def carregar_material_completo(client, material_id, professor_id) -> dict | None:
-    mat = (
-        client.table("materiais")
-        .select("*")
-        .eq("id", material_id)
-        .eq("professor_id", professor_id)
-        .single()
-        .execute()
-    )
-    if not mat.data:
-        return None
-    pr = client.table("parametros_rede").select("*").eq("material_id", material_id).limit(1).execute()
-    rs = client.table("rota_sintese").select("*").eq("material_id", material_id).limit(1).execute()
-    return {
-        "material": mat.data,
-        "parametros_rede": (pr.data or [{}])[0],
-        "rota_sintese": (rs.data or [{}])[0],
-    }
-
-
-def excluir_material(client, material_id, professor_id):
-    dono = (
-        client.table("materiais")
-        .select("id")
-        .eq("id", material_id)
-        .eq("professor_id", professor_id)
-        .execute()
-    )
-    if not dono.data:
-        raise PermissionError("Este material não é seu.")
-    for tabela in ("parametros_rede", "rota_sintese", "caracterizacoes", "propriedades_fisicas", "publicacoes"):
-        try:
-            client.table(tabela).delete().eq("material_id", material_id).execute()
-        except Exception:
-            pass
-    client.table("materiais").delete().eq("id", material_id).eq("professor_id", professor_id).execute()
-
-
-def secao_acervo(client, professor):
+def secao_acervo(client):
     st.subheader("Materiais cadastrados")
     try:
         linhas = listar_materiais(client)
     except Exception as e:
         st.warning(f"Não consegui listar os materiais no Supabase: {e}")
-        return []
+        return
 
     if not linhas:
         st.info("Nenhum material cadastrado ainda.")
-        return []
+        return
 
     col_f, col_s, col_p = st.columns(3)
     with col_f:
@@ -674,61 +636,6 @@ def secao_acervo(client, professor):
         for m in filtradas
     ]
     st.dataframe(visivel, hide_index=True, width="stretch")
-    return linhas
-
-
-def secao_meus_materiais(client, professor, linhas: list[dict]):
-    meus = [m for m in linhas if m.get("professor_id") == professor["id"]]
-    st.subheader("Meus materiais")
-    if not meus:
-        st.caption("Você ainda não cadastrou nenhum material.")
-        return
-
-    rotulos = {
-        f"{m.get('formula') or '(sem fórmula)'} — {(m.get('criado_em') or '')[:10]}": m["id"]
-        for m in meus
-    }
-    escolha = st.selectbox("Selecione um material seu", list(rotulos.keys()), key="meu_material")
-    material_id = rotulos[escolha]
-    completo = carregar_material_completo(client, material_id, professor["id"])
-    if not completo:
-        st.error("Não encontrei esse material (ele não é seu ou foi apagado).")
-        return
-
-    with st.form(f"form_editar_{material_id}"):
-        campos = coletar_campos_material(
-            f"edit_{material_id}",
-            completo["material"],
-            completo["parametros_rede"],
-            completo["rota_sintese"],
-        )
-        salvar = st.form_submit_button("Salvar alterações")
-        if salvar:
-            erro = validar_campos_material(campos)
-            if erro:
-                st.error(erro)
-            else:
-                try:
-                    client.table("materiais").update(
-                        dados_tabela_material(professor["id"], campos)
-                    ).eq("id", material_id).eq("professor_id", professor["id"]).execute()
-                    gravar_filhos_material(client, material_id, campos)
-                    st.success("Material atualizado.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Erro ao atualizar: {e}")
-
-    confirmar = st.checkbox("Confirmo que quero excluir este material", key=f"del_ok_{material_id}")
-    if st.button("Excluir material", type="secondary", key=f"del_btn_{material_id}"):
-        if not confirmar:
-            st.warning("Marque a confirmação antes de excluir.")
-        else:
-            try:
-                excluir_material(client, material_id, professor["id"])
-                st.success("Material excluído.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Erro ao excluir: {e}")
 
 
 def formulario_material(professor):
@@ -794,9 +701,7 @@ def formulario_material(professor):
     if client is None:
         st.warning("Sessão inválida. Entre novamente com o ORCID.")
         return
-    linhas = secao_acervo(client, professor)
-    st.divider()
-    secao_meus_materiais(client, professor, linhas)
+    secao_acervo(client)
 
 
 # ---------- Roteamento principal ----------
