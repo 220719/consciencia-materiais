@@ -109,74 +109,124 @@ def texto_de_pdf_bytes(pdf_bytes: bytes) -> str | None:
 
 
 PROMPT_EXTRACAO = """Leia o texto de artigo científico de ciência de materiais abaixo e chame a
-ferramenta "registrar_dados_material" com os campos que você conseguir identificar.
+ferramenta "registrar_materiais_do_artigo" com tudo que você conseguir identificar.
 
-Regras importantes:
+Um artigo quase nunca descreve um único conjunto de dados. Não resuma: registre todas as
+composições e todas as medidas estruturais relatadas.
+
+Como separar materiais de medidas:
+- Cada COMPOSIÇÃO química distinta é um material próprio. Séries de dopagem (x = 0,01; 0,05; 0,10 ...)
+  geram um material por valor de x, cada um com sua fórmula e seu percentual de dopagem.
+- A MESMA composição medida em condições diferentes (temperaturas, fases, pressões, técnicas)
+  é um único material com várias entradas em "medidas".
+- Se o artigo traz uma tabela com N temperaturas, registre as N medidas, não apenas a primeira.
+  Em "condicao", identifique a medida como o artigo a identifica (ex.: "298 K", "fase cúbica a 473 K").
+
+Outras regras:
+- Registre apenas os materiais preparados ou caracterizados neste trabalho. Compostos citados
+  só como referência, comparação ou contexto histórico não entram na lista.
 - Se um valor não aparecer explicitamente no texto, deixe o campo de fora (não invente ou estime valores).
-- Parâmetros de rede em Ångström (Å), ângulos em graus, temperaturas em Celsius, tempos em horas.
-- Se o artigo descrever mais de um material, extraia apenas o material principal/protagonista do estudo.
+- A técnica de medida normalmente vale para a série inteira: repita o mesmo valor de
+  "tecnica_medicao" em todas as medidas do material, em vez de usar "Outra" a partir da segunda.
+- Parâmetros de rede em Ångström (Å), ângulos em graus.
+- Temperatura de medida em kelvin; temperaturas de síntese em Celsius; tempos em horas.
 
 Texto do artigo:
 {texto}
 """
 
+SISTEMAS = ["Cúbico", "Tetragonal", "Ortorrômbico", "Romboédrico",
+            "Hexagonal", "Monoclínico", "Triclínico"]
+TECNICAS = ["DRX laboratório (Cu Kα)", "Síncrotron", "Nêutrons", "Outra"]
+
+ESQUEMA_MEDIDA = {
+    "type": "object",
+    "description": "Um conjunto de parâmetros de rede medido em uma condição específica.",
+    "properties": {
+        "condicao": {
+            "type": "string",
+            "description": "Como o artigo identifica esta medida. Ex: '298 K', 'fase tetragonal', 'após sinterização'.",
+        },
+        "temperatura_k": {"type": "number", "description": "Temperatura da medida, em kelvin."},
+        "sistema_cristalino": {"type": "string", "enum": SISTEMAS},
+        "grupo_espacial": {"type": "string"},
+        "a": {"type": "number"},
+        "b": {"type": "number"},
+        "c": {"type": "number"},
+        "alpha": {"type": "number"},
+        "beta": {"type": "number"},
+        "gamma": {"type": "number"},
+        "tecnica_medicao": {"type": "string", "enum": TECNICAS},
+    },
+}
+
+ESQUEMA_MATERIAL = {
+    "type": "object",
+    "properties": {
+        "formula": {"type": "string"},
+        "nome_comum": {"type": "string"},
+        "sistema_cristalino": {"type": "string", "enum": SISTEMAS},
+        "grupo_espacial": {"type": "string"},
+        "familia_estrutural": {"type": "string"},
+        "aplicacao_alvo": {"type": "string"},
+        "dopante": {"type": "string"},
+        "percentual_dopagem": {"type": "number"},
+        "medidas": {"type": "array", "items": ESQUEMA_MEDIDA},
+        "rota_sintese": {
+            "type": "object",
+            "properties": {
+                "metodo": {"type": "string"},
+                "precursores": {"type": "string"},
+                "temp_calcinacao": {"type": "number"},
+                "tempo_calcinacao": {"type": "number"},
+                "taxa_aquecimento": {"type": "number"},
+                "taxa_resfriamento": {"type": "number"},
+                "atmosfera": {"type": "string", "enum": ["Ar", "O2", "N2", "Vácuo"]},
+            },
+        },
+    },
+    "required": ["formula"],
+}
+
 FERRAMENTA_EXTRACAO = {
-    "name": "registrar_dados_material",
-    "description": "Registra os dados estruturados de um material extraídos de um artigo científico.",
+    "name": "registrar_materiais_do_artigo",
+    "description": "Registra todos os materiais e todas as medidas estruturais relatados em um artigo.",
     "input_schema": {
         "type": "object",
         "properties": {
-            "formula": {"type": "string"},
-            "nome_comum": {"type": "string"},
-            "sistema_cristalino": {
-                "type": "string",
-                "enum": ["Cúbico", "Tetragonal", "Ortorrômbico", "Romboédrico",
-                         "Hexagonal", "Monoclínico", "Triclínico"],
-            },
-            "grupo_espacial": {"type": "string"},
-            "familia_estrutural": {"type": "string"},
-            "aplicacao_alvo": {"type": "string"},
-            "dopante": {"type": "string"},
-            "percentual_dopagem": {"type": "number"},
-            "parametros_rede": {
-                "type": "object",
-                "properties": {
-                    "a": {"type": "number"},
-                    "b": {"type": "number"},
-                    "c": {"type": "number"},
-                    "alpha": {"type": "number"},
-                    "beta": {"type": "number"},
-                    "gamma": {"type": "number"},
-                    "tecnica_medicao": {
-                        "type": "string",
-                        "enum": ["DRX laboratório (Cu Kα)", "Síncrotron", "Nêutrons", "Outra"],
-                    },
-                },
-            },
-            "rota_sintese": {
-                "type": "object",
-                "properties": {
-                    "metodo": {"type": "string"},
-                    "precursores": {"type": "string"},
-                    "temp_calcinacao": {"type": "number"},
-                    "tempo_calcinacao": {"type": "number"},
-                    "atmosfera": {"type": "string", "enum": ["Ar", "O2", "N2", "Vácuo"]},
-                },
-            },
+            "materiais": {"type": "array", "items": ESQUEMA_MATERIAL},
         },
+        "required": ["materiais"],
     },
 }
 
 
-def extrair_campos_com_claude(texto_artigo: str) -> dict:
+def normalizar_materiais(payload: dict) -> list[dict]:
+    """Aceita o formato novo (lista de materiais) e o antigo (um material com parametros_rede)."""
+    materiais = payload.get("materiais") if isinstance(payload, dict) else None
+    if materiais is None:
+        materiais = [payload] if payload else []
+
+    normalizados = []
+    for item in materiais:
+        if not isinstance(item, dict):
+            continue
+        medidas = [m for m in (item.get("medidas") or []) if isinstance(m, dict)]
+        if not medidas and item.get("parametros_rede"):
+            medidas = [item["parametros_rede"]]
+        normalizados.append({**item, "medidas": medidas})
+    return normalizados
+
+
+def extrair_campos_com_claude(texto_artigo: str) -> list[dict]:
     client = Anthropic()
     texto_truncado = texto_artigo[:60000]
 
     resposta = client.messages.create(
         model=CLAUDE_MODEL,
-        max_tokens=1500,
+        max_tokens=16000,
         tools=[FERRAMENTA_EXTRACAO],
-        tool_choice={"type": "tool", "name": "registrar_dados_material"},
+        tool_choice={"type": "tool", "name": "registrar_materiais_do_artigo"},
         messages=[
             {"role": "user", "content": PROMPT_EXTRACAO.replace("{texto}", texto_truncado)}
         ],
@@ -184,7 +234,7 @@ def extrair_campos_com_claude(texto_artigo: str) -> dict:
 
     for bloco in resposta.content:
         if bloco.type == "tool_use":
-            return bloco.input
+            return normalizar_materiais(bloco.input)
 
     raise ValueError("A resposta do Claude não contém uma chamada de ferramenta.")
 

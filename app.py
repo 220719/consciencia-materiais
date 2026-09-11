@@ -72,6 +72,28 @@ def _numero(valor, padrao=0.0) -> float:
         return float(padrao)
 
 
+def _numero_ou_none(valor) -> float | None:
+    try:
+        if valor is None or valor == "":
+            return None
+        return float(valor)
+    except (TypeError, ValueError):
+        return None
+
+
+def registrar_extracao(materiais: list[dict]):
+    materiais = [m for m in (materiais or []) if isinstance(m, dict)]
+    if not materiais:
+        st.warning("O artigo foi lido, mas nenhum material foi identificado no texto.")
+        return
+    st.session_state["extraidos"] = materiais
+    medidas = sum(len(m.get("medidas") or []) for m in materiais)
+    st.success(
+        f"{len(materiais)} material(is) e {medidas} medida(s) encontrados. "
+        "Revise antes de salvar."
+    )
+
+
 def cliente_da_sessao():
     """Cliente por rerun — set_session no client compartilhado vaza token entre usuários no Cloud."""
     url = _get_secret("SUPABASE_URL")
@@ -261,7 +283,7 @@ def encerrar_sessao():
     st.session_state.pop("access_token", None)
     st.session_state.pop("refresh_token", None)
     st.session_state.pop("auth_url", None)
-    st.session_state.pop("extraido", None)
+    st.session_state.pop("extraidos", None)
     st.session_state.pop("publicacoes_orcid", None)
 
 
@@ -301,8 +323,7 @@ def executar_extracao_por_doi(doi):
             "(provável bloqueio da editora). Tente enviar o PDF na aba 'Enviar PDF'."
         )
         return
-    st.session_state["extraido"] = extrair_campos_com_claude(texto)
-    st.success("Dados extraídos! Revise no formulário abaixo antes de salvar.")
+    registrar_extracao(extrair_campos_com_claude(texto))
     st.rerun()
 
 
@@ -328,8 +349,7 @@ def secao_extracao_automatica(professor):
                         if texto is None:
                             st.warning("Não consegui ler texto desse PDF (pode ser um PDF escaneado).")
                         else:
-                            st.session_state["extraido"] = extrair_campos_com_claude(texto)
-                            st.success("Dados extraídos! Revise no formulário abaixo antes de salvar.")
+                            registrar_extracao(extrair_campos_com_claude(texto))
                             st.rerun()
                     except Exception as e:
                         st.error(f"Erro na extração: {e}")
@@ -508,18 +528,64 @@ def dados_tabela_material(professor_id, campos: dict) -> dict:
     }
 
 
-def gravar_filhos_material(client, material_id, campos: dict):
-    rede = {"a": campos["a"], "b": campos["b"], "c": campos["c"],
+COLUNAS_CONDICAO = ("condicao", "temperatura_k")
+
+
+def inserir_parametros_rede(client, linhas: list[dict]):
+    """Grava as medidas. Se o banco ainda não tem as colunas de condição, regrava sem elas."""
+    if not linhas:
+        return
+    try:
+        client.table("parametros_rede").insert(linhas).execute()
+    except Exception:
+        simples = [
+            {k: v for k, v in linha.items() if k not in COLUNAS_CONDICAO}
+            for linha in linhas
+        ]
+        client.table("parametros_rede").insert(simples).execute()
+
+
+def linha_de_medida(material_id, medida: dict) -> dict | None:
+    a = _numero_ou_none(medida.get("a"))
+    b = _numero_ou_none(medida.get("b"))
+    c = _numero_ou_none(medida.get("c"))
+    if not (a or b or c):
+        return None
+    tecnica = medida.get("tecnica_medicao")
+    return {
+        "material_id": material_id,
+        "a": a, "b": b, "c": c,
+        "alpha": _numero_ou_none(medida.get("alpha")),
+        "beta": _numero_ou_none(medida.get("beta")),
+        "gamma": _numero_ou_none(medida.get("gamma")),
+        "tecnica_medicao": tecnica if tecnica in TECNICAS_MEDICAO[1:] else None,
+        "condicao": medida.get("condicao") or None,
+        "temperatura_k": _numero_ou_none(medida.get("temperatura_k")),
+    }
+
+
+def gravar_filhos_material(client, material_id, campos: dict, medidas: list[dict] | None = None):
+    medidas = list(medidas or [])
+    linhas = []
+
+    if campos["a"] or campos["b"] or campos["c"]:
+        principal = {
+            "material_id": material_id,
+            "a": campos["a"], "b": campos["b"], "c": campos["c"],
             "alpha": campos["alpha"], "beta": campos["beta"], "gamma": campos["gamma"],
-            "tecnica_medicao": campos["tecnica_medicao"]}
-    existente_pr = (
-        client.table("parametros_rede").select("id").eq("material_id", material_id).limit(1).execute()
-    )
-    if campos["a"] or campos["b"] or campos["c"] or existente_pr.data:
-        if existente_pr.data:
-            client.table("parametros_rede").update(rede).eq("id", existente_pr.data[0]["id"]).execute()
-        else:
-            client.table("parametros_rede").insert({"material_id": material_id, **rede}).execute()
+            "tecnica_medicao": campos["tecnica_medicao"],
+            "condicao": (medidas[0].get("condicao") if medidas else None) or None,
+            "temperatura_k": _numero_ou_none(medidas[0].get("temperatura_k")) if medidas else None,
+        }
+        linhas.append(principal)
+
+    # A primeira medida já foi para o formulário; as demais entram como estavam no artigo.
+    for medida in medidas[1:]:
+        linha = linha_de_medida(material_id, medida)
+        if linha:
+            linhas.append(linha)
+
+    inserir_parametros_rede(client, linhas)
 
     rota = {
         "metodo": campos["metodo"],
@@ -539,6 +605,145 @@ def gravar_filhos_material(client, material_id, campos: dict):
             client.table("rota_sintese").update(rota).eq("id", existente_rs.data[0]["id"]).execute()
         elif tem_rota:
             client.table("rota_sintese").insert({"material_id": material_id, **rota}).execute()
+
+
+def campos_de_extraido(item: dict) -> dict:
+    """Achata um material extraído (primeira medida + rota) no formato usado para gravar."""
+    medidas = item.get("medidas") or []
+    pr = medidas[0] if medidas else {}
+    rs = item.get("rota_sintese") or {}
+    sistema = item.get("sistema_cristalino") or pr.get("sistema_cristalino")
+    tecnica = pr.get("tecnica_medicao")
+    atmosfera = rs.get("atmosfera")
+    return {
+        "formula": (item.get("formula") or "").strip(),
+        "nome_comum": (item.get("nome_comum") or "").strip() or None,
+        "sistema_cristalino": sistema if sistema in SISTEMAS_CRISTALINOS[1:] else None,
+        "grupo_espacial": (item.get("grupo_espacial") or pr.get("grupo_espacial") or "").strip() or None,
+        "familia_estrutural": (item.get("familia_estrutural") or "").strip() or None,
+        "aplicacao_alvo": (item.get("aplicacao_alvo") or "").strip() or None,
+        "dopante": (item.get("dopante") or "").strip() or None,
+        "percentual_dopagem": _numero_ou_none(item.get("percentual_dopagem")),
+        "a": _numero_ou_none(pr.get("a")),
+        "b": _numero_ou_none(pr.get("b")),
+        "c": _numero_ou_none(pr.get("c")),
+        "alpha": _numero_ou_none(pr.get("alpha")),
+        "beta": _numero_ou_none(pr.get("beta")),
+        "gamma": _numero_ou_none(pr.get("gamma")),
+        "tecnica_medicao": tecnica if tecnica in TECNICAS_MEDICAO[1:] else None,
+        "metodo": (rs.get("metodo") or "").strip() or None,
+        "precursores": (rs.get("precursores") or "").strip() or None,
+        "temp_calcinacao": _numero_ou_none(rs.get("temp_calcinacao")),
+        "tempo_calcinacao": _numero_ou_none(rs.get("tempo_calcinacao")),
+        "taxa_aquecimento": _numero_ou_none(rs.get("taxa_aquecimento")),
+        "taxa_resfriamento": _numero_ou_none(rs.get("taxa_resfriamento")),
+        "atmosfera": atmosfera if atmosfera in ATMOSFERAS[1:] else None,
+    }
+
+
+def salvar_material(client, professor_id, campos: dict, medidas: list[dict] | None = None):
+    material = client.table("materiais").insert(
+        dados_tabela_material(professor_id, campos)
+    ).execute()
+    gravar_filhos_material(client, material.data[0]["id"], campos, medidas)
+
+
+def resumo_medidas(medidas: list[dict]) -> list[dict]:
+    return [
+        {
+            "Condição": m.get("condicao") or "—",
+            "T (K)": m.get("temperatura_k"),
+            "Sistema": m.get("sistema_cristalino"),
+            "Grupo": m.get("grupo_espacial"),
+            "a (Å)": m.get("a"),
+            "b (Å)": m.get("b"),
+            "c (Å)": m.get("c"),
+        }
+        for m in medidas
+    ]
+
+
+def rotulo_extraido(i: int, item: dict) -> str:
+    partes = [item.get("formula") or "(sem fórmula)"]
+    if item.get("dopante") and item.get("percentual_dopagem") is not None:
+        partes.append(f"{item['dopante']} {item['percentual_dopagem']}%")
+    medidas = item.get("medidas") or []
+    partes.append(f"{len(medidas)} medida(s)" if medidas else "sem medidas")
+    return f"{i + 1}. " + " — ".join(partes)
+
+
+def secao_extraidos() -> tuple[int, dict]:
+    """Mostra o que foi extraído do artigo e devolve (índice, material) escolhido para o formulário."""
+    extraidos = st.session_state.get("extraidos") or []
+    if not extraidos:
+        return -1, {}
+
+    col_info, col_limpar = st.columns([4, 1])
+    with col_info:
+        st.info(
+            f"{len(extraidos)} material(is) extraído(s) do artigo — revise antes de salvar."
+        )
+    with col_limpar:
+        if st.button("Limpar"):
+            del st.session_state["extraidos"]
+            st.rerun()
+
+    indice = 0
+    if len(extraidos) > 1:
+        rotulos = [rotulo_extraido(i, m) for i, m in enumerate(extraidos)]
+        escolha = st.selectbox("Material do artigo a revisar", rotulos)
+        indice = rotulos.index(escolha)
+    atual = extraidos[indice]
+
+    medidas = atual.get("medidas") or []
+    if len(medidas) > 1:
+        st.caption(
+            f"Este material tem {len(medidas)} medidas. O formulário mostra a primeira; "
+            "ao salvar, todas são gravadas."
+        )
+        st.dataframe(resumo_medidas(medidas), hide_index=True, width="stretch")
+
+    return indice, atual
+
+
+def salvar_todos_extraidos(client, professor):
+    extraidos = st.session_state.get("extraidos") or []
+    if not extraidos:
+        return
+    total_medidas = sum(len(m.get("medidas") or []) for m in extraidos)
+    if not st.button(
+        f"Salvar os {len(extraidos)} materiais do artigo ({total_medidas} medidas)",
+        type="primary",
+    ):
+        return
+
+    salvos, pulados, falhas = 0, [], []
+    for item in extraidos:
+        campos = campos_de_extraido(item)
+        if not campos["formula"]:
+            falhas.append("material sem fórmula")
+            continue
+        if not (item.get("medidas") or item.get("rota_sintese")):
+            # Composto apenas citado no artigo: só a fórmula, nada a registrar.
+            pulados.append(campos["formula"])
+            continue
+        try:
+            salvar_material(client, professor["id"], campos, item.get("medidas"))
+            salvos += 1
+        except Exception as e:
+            falhas.append(f"{campos['formula']}: {e}")
+
+    if pulados:
+        st.info(
+            "Sem dados para registrar (só a fórmula, provavelmente citação do artigo): "
+            + ", ".join(pulados)
+        )
+    for erro in falhas:
+        st.error(f"Não salvei — {erro}")
+    if salvos:
+        st.success(f"{salvos} material(is) salvo(s).")
+        del st.session_state["extraidos"]
+        st.rerun()
 
 
 def listar_materiais(client) -> list[dict]:
@@ -645,18 +850,25 @@ def formulario_material(professor):
 
     secao_extracao_automatica(professor)
 
-    extraido = st.session_state.get("extraido", {}) or {}
-    pr = extraido.get("parametros_rede") or {}
+    indice, extraido = secao_extraidos()
+    medidas = extraido.get("medidas") or []
+    pr = medidas[0] if medidas else {}
     rs = extraido.get("rota_sintese") or {}
-
     if extraido:
-        col_info, col_limpar = st.columns([4, 1])
-        with col_info:
-            st.info("Campos pré-preenchidos automaticamente — revise antes de salvar.")
-        with col_limpar:
-            if st.button("Limpar"):
-                del st.session_state["extraido"]
-                st.rerun()
+        # Sistema e grupo às vezes vêm só na medida; o formulário mostra o que existir.
+        extraido = {
+            **extraido,
+            "sistema_cristalino": extraido.get("sistema_cristalino") or pr.get("sistema_cristalino"),
+            "grupo_espacial": extraido.get("grupo_espacial") or pr.get("grupo_espacial"),
+        }
+
+    client = cliente_da_sessao()
+    if client is None:
+        st.warning("Sessão inválida. Entre novamente com o ORCID.")
+        return
+
+    if len(st.session_state.get("extraidos") or []) > 1:
+        salvar_todos_extraidos(client, professor)
 
     with st.form("form_material", clear_on_submit=True):
         campos = coletar_campos_material(extraido, pr, rs)
@@ -667,31 +879,23 @@ def formulario_material(professor):
             if erro:
                 st.error(erro)
                 return
-
-            client = cliente_da_sessao()
-            if client is None:
-                st.error("Sessão inválida. Entre novamente com o ORCID.")
-                return
             try:
-                material = client.table("materiais").insert(
-                    dados_tabela_material(professor["id"], campos)
-                ).execute()
-                material_id = material.data[0]["id"]
-                gravar_filhos_material(client, material_id, campos)
+                salvar_material(client, professor["id"], campos, medidas)
             except Exception as e:
                 st.error(f"Erro ao salvar no Supabase: {e}")
                 return
 
-            if "extraido" in st.session_state:
-                del st.session_state["extraido"]
+            restantes = list(st.session_state.get("extraidos") or [])
+            if 0 <= indice < len(restantes):
+                restantes.pop(indice)
+            if restantes:
+                st.session_state["extraidos"] = restantes
+            else:
+                st.session_state.pop("extraidos", None)
             st.success(f"Material '{campos['formula']}' salvo com sucesso!")
             st.rerun()
 
     st.divider()
-    client = cliente_da_sessao()
-    if client is None:
-        st.warning("Sessão inválida. Entre novamente com o ORCID.")
-        return
     secao_acervo(client)
 
 
