@@ -367,7 +367,9 @@ def secao_extracao_automatica(professor):
                                     st.error(f"Erro na extração: {e}")
 
 
-def coletar_campos_material(prefix: str, extraido: dict, pr: dict, rs: dict) -> dict:
+def coletar_campos_material(extraido: dict, pr: dict, rs: dict) -> dict:
+    # Sem `key=` nos widgets: com key, o Streamlit guarda o valor antigo na sessão
+    # e ignora o `value=` vindo da extração automática.
     st.markdown("**Dados essenciais**")
     col1, col2 = st.columns(2)
     with col1:
@@ -375,44 +377,38 @@ def coletar_campos_material(prefix: str, extraido: dict, pr: dict, rs: dict) -> 
             "Fórmula química *",
             value=extraido.get("formula") or "",
             placeholder="Ex: Bi0.9Nd0.1FeO3",
-            key=f"{prefix}_formula",
         )
         nome_comum = st.text_input(
             "Nome comum (opcional)",
             value=extraido.get("nome_comum") or "",
-            key=f"{prefix}_nome",
         )
         sistema_cristalino = st.selectbox(
             "Sistema cristalino",
             SISTEMAS_CRISTALINOS,
             index=idx_selectbox(SISTEMAS_CRISTALINOS, extraido.get("sistema_cristalino")),
-            key=f"{prefix}_sistema",
         )
         grupo_espacial = st.text_input(
             "Grupo espacial",
             value=extraido.get("grupo_espacial") or "",
             placeholder="Ex: R3c",
-            key=f"{prefix}_grupo",
         )
     with col2:
-        a = st.number_input("a (Å)", min_value=0.0, value=_numero(pr.get("a")), format="%.4f", key=f"{prefix}_a")
-        b = st.number_input("b (Å)", min_value=0.0, value=_numero(pr.get("b")), format="%.4f", key=f"{prefix}_b")
-        c = st.number_input("c (Å)", min_value=0.0, value=_numero(pr.get("c")), format="%.4f", key=f"{prefix}_c")
-        alpha = st.number_input("α (°)", min_value=0.0, max_value=180.0, value=_numero(pr.get("alpha"), 90.0), format="%.2f", key=f"{prefix}_alpha")
-        beta = st.number_input("β (°)", min_value=0.0, max_value=180.0, value=_numero(pr.get("beta"), 90.0), format="%.2f", key=f"{prefix}_beta")
-        gamma = st.number_input("γ (°)", min_value=0.0, max_value=180.0, value=_numero(pr.get("gamma"), 90.0), format="%.2f", key=f"{prefix}_gamma")
+        a = st.number_input("a (Å)", min_value=0.0, value=_numero(pr.get("a")), format="%.4f")
+        b = st.number_input("b (Å)", min_value=0.0, value=_numero(pr.get("b")), format="%.4f")
+        c = st.number_input("c (Å)", min_value=0.0, value=_numero(pr.get("c")), format="%.4f")
+        alpha = st.number_input("α (°)", min_value=0.0, max_value=180.0, value=_numero(pr.get("alpha"), 90.0), format="%.2f")
+        beta = st.number_input("β (°)", min_value=0.0, max_value=180.0, value=_numero(pr.get("beta"), 90.0), format="%.2f")
+        gamma = st.number_input("γ (°)", min_value=0.0, max_value=180.0, value=_numero(pr.get("gamma"), 90.0), format="%.2f")
 
     tecnica_medicao = st.selectbox(
         "Técnica de medição dos parâmetros de rede",
         TECNICAS_MEDICAO,
         index=idx_selectbox(TECNICAS_MEDICAO, pr.get("tecnica_medicao")),
-        key=f"{prefix}_tecnica",
     )
     metodo_sintese = st.text_input(
         "Rota de síntese (resumo)",
         value=rs.get("metodo") or "",
         placeholder="Ex: Reação de estado sólido",
-        key=f"{prefix}_metodo",
     )
 
     with st.expander("+ Mais detalhes do material"):
@@ -420,17 +416,15 @@ def coletar_campos_material(prefix: str, extraido: dict, pr: dict, rs: dict) -> 
             "Família estrutural",
             value=extraido.get("familia_estrutural") or "",
             placeholder="Ex: Perovskita",
-            key=f"{prefix}_familia",
         )
         aplicacao_alvo = st.text_input(
             "Aplicação-alvo",
             value=extraido.get("aplicacao_alvo") or "",
             placeholder="Ex: Multiferróico",
-            key=f"{prefix}_aplicacao",
         )
         col3, col4 = st.columns(2)
         with col3:
-            dopante = st.text_input("Dopante", value=extraido.get("dopante") or "", placeholder="Ex: Nd", key=f"{prefix}_dopante")
+            dopante = st.text_input("Dopante", value=extraido.get("dopante") or "", placeholder="Ex: Nd")
         with col4:
             percentual_dopagem = st.number_input(
                 "Percentual de dopagem (%)",
@@ -438,7 +432,6 @@ def coletar_campos_material(prefix: str, extraido: dict, pr: dict, rs: dict) -> 
                 max_value=100.0,
                 value=_numero(extraido.get("percentual_dopagem")),
                 format="%.2f",
-                key=f"{prefix}_dopagem",
             )
 
     with st.expander("+ Mais detalhes da síntese"):
@@ -446,31 +439,29 @@ def coletar_campos_material(prefix: str, extraido: dict, pr: dict, rs: dict) -> 
             "Precursores",
             value=rs.get("precursores") or "",
             placeholder="Ex: Bi2O3, Nd2O3, Fe2O3",
-            key=f"{prefix}_precursores",
         )
         col5, col6 = st.columns(2)
         with col5:
             temp_calcinacao = st.number_input(
                 "Temperatura de calcinação (°C)", min_value=0.0,
-                value=_numero(rs.get("temp_calcinacao")), format="%.1f", key=f"{prefix}_tcal",
+                value=_numero(rs.get("temp_calcinacao")), format="%.1f",
             )
             taxa_aquecimento = st.number_input(
                 "Taxa de aquecimento (°C/min)", min_value=0.0,
-                value=_numero(rs.get("taxa_aquecimento")), format="%.2f", key=f"{prefix}_taq",
+                value=_numero(rs.get("taxa_aquecimento")), format="%.2f",
             )
             atmosfera = st.selectbox(
                 "Atmosfera", ATMOSFERAS,
                 index=idx_selectbox(ATMOSFERAS, rs.get("atmosfera")),
-                key=f"{prefix}_atm",
             )
         with col6:
             tempo_calcinacao = st.number_input(
                 "Tempo de calcinação (h)", min_value=0.0,
-                value=_numero(rs.get("tempo_calcinacao")), format="%.1f", key=f"{prefix}_hcal",
+                value=_numero(rs.get("tempo_calcinacao")), format="%.1f",
             )
             taxa_resfriamento = st.number_input(
                 "Taxa de resfriamento (°C/min)", min_value=0.0,
-                value=_numero(rs.get("taxa_resfriamento")), format="%.2f", key=f"{prefix}_tres",
+                value=_numero(rs.get("taxa_resfriamento")), format="%.2f",
             )
 
     return {
@@ -668,7 +659,7 @@ def formulario_material(professor):
                 st.rerun()
 
     with st.form("form_material", clear_on_submit=True):
-        campos = coletar_campos_material("novo", extraido, pr, rs)
+        campos = coletar_campos_material(extraido, pr, rs)
         enviado = st.form_submit_button("Salvar material")
 
         if enviado:
