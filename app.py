@@ -1,11 +1,14 @@
+import json
 import os
 from urllib.parse import urlencode, urlparse
 
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
 
 import streamlit as st
+import streamlit.components.v1 as components
 from supabase import create_client, ClientOptions
 from supabase_auth.helpers import generate_pkce_challenge, generate_pkce_verifier
 
@@ -72,20 +75,36 @@ def url_publica() -> str:
     return _get_secret("REDIRECT_URL", "http://localhost:8502") or "http://localhost:8502"
 
 
+@st.cache_data(ttl=45)
+def supabase_auth_acessivel(url: str) -> bool:
+    try:
+        resp = requests.get(f"{url.rstrip('/')}/auth/v1/settings", timeout=6)
+        return resp.status_code == 200
+    except requests.RequestException:
+        return False
+
+
 def montar_url_login_orcid() -> str:
-    """PKCE com verifier na URL de retorno — sobrevive se o Streamlit reiniciar no meio do login."""
+    """PKCE com verifier no `state` (redirect limpo — o Cloud não corta query aninhada)."""
     url_supabase = _get_secret("SUPABASE_URL")
     if not url_supabase:
         raise RuntimeError("SUPABASE_URL ausente")
     verifier = generate_pkce_verifier()
-    destino = f"{url_publica()}/?cv={verifier}"
     params = {
         "provider": "custom:orcid",
-        "redirect_to": destino,
+        "redirect_to": f"{url_publica()}/",
         "code_challenge": generate_pkce_challenge(verifier),
         "code_challenge_method": "s256",
+        "state": verifier,
     }
     return f"{url_supabase.rstrip('/')}/auth/v1/authorize?{urlencode(params)}"
+
+
+def ir_para(url: str):
+    components.html(
+        f"<script>window.top.location.href = {json.dumps(url)};</script>",
+        height=0,
+    )
 
 
 def idx_selectbox(opcoes, valor):
@@ -124,8 +143,32 @@ def fazer_login():
     st.title("🧪 Rede de Materiais")
     st.caption("Entre com seu ORCID para cadastrar materiais.")
 
+    url_supabase = _get_secret("SUPABASE_URL") or ""
+    if not url_supabase or not supabase_auth_acessivel(url_supabase):
+        st.error(
+            "O servidor de autenticação do Supabase está fora do ar "
+            "(DNS ou Auth sem resposta). O ORCID não consegue completar o login assim."
+        )
+        st.markdown(
+            "Abra o projeto no dashboard, restaure se estiver pausado/inexistente "
+            "e confira se a URL em `SUPABASE_URL` (`.env` e secrets do Cloud) é a atual:"
+        )
+        if url_supabase:
+            ref = urlparse(url_supabase).hostname or ""
+            ref = ref.replace(".supabase.co", "")
+            if ref:
+                st.link_button(
+                    "Abrir dashboard do Supabase",
+                    f"https://supabase.com/dashboard/project/{ref}",
+                )
+        if st.button("Verificar de novo"):
+            supabase_auth_acessivel.clear()
+            st.rerun()
+        return
+
     try:
-        st.link_button("Entrar com ORCID", montar_url_login_orcid())
+        if st.button("Entrar com ORCID", type="primary"):
+            ir_para(montar_url_login_orcid())
     except Exception as e:
         st.error(f"Não consegui gerar o login ORCID/Supabase: {e}")
         if st.button("Tentar novamente"):
@@ -146,7 +189,7 @@ def processar_callback():
     if not code:
         return False
 
-    verifier = st.query_params.get("cv")
+    verifier = st.query_params.get("state") or st.query_params.get("cv")
     if not verifier:
         st.query_params.clear()
         st.error("O retorno do login chegou sem o verificador PKCE. Clique em Entrar com ORCID de novo.")
@@ -158,7 +201,7 @@ def processar_callback():
         result = supabase.auth.exchange_code_for_session({
             "auth_code": code,
             "code_verifier": verifier,
-            "redirect_to": f"{url_publica()}/?cv={verifier}",
+            "redirect_to": f"{url_publica()}/",
         })
         if not result.session:
             raise RuntimeError("Supabase não devolveu sessão após o ORCID.")
