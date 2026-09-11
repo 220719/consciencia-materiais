@@ -75,11 +75,20 @@ def url_publica() -> str:
     return _get_secret("REDIRECT_URL", "http://localhost:8502") or "http://localhost:8502"
 
 
-@st.cache_data(ttl=45)
 def supabase_auth_acessivel(url: str) -> bool:
+    """Qualquer resposta HTTP do Auth (inclui 401 sem apikey) significa que o host está no ar."""
+    headers = {}
+    chave = _get_secret("SUPABASE_ANON_KEY")
+    if chave:
+        headers["apikey"] = chave
+        headers["Authorization"] = f"Bearer {chave}"
     try:
-        resp = requests.get(f"{url.rstrip('/')}/auth/v1/settings", timeout=6)
-        return resp.status_code == 200
+        resp = requests.get(
+            f"{url.rstrip('/')}/auth/v1/settings",
+            headers=headers,
+            timeout=8,
+        )
+        return resp.status_code < 500
     except requests.RequestException:
         return False
 
@@ -162,7 +171,6 @@ def fazer_login():
                     f"https://supabase.com/dashboard/project/{ref}",
                 )
         if st.button("Verificar de novo"):
-            supabase_auth_acessivel.clear()
             st.rerun()
         return
 
