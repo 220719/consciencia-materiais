@@ -13,13 +13,17 @@ SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 
 TABELAS = [
+    "pesquisadores",
+    "fontes",
+    "composicoes",
+    "amostras",
+    "rotas_sintese",
+    "medidas_estruturais",
+    "grupos_espaciais",
     "professores",
     "materiais",
     "parametros_rede",
     "rota_sintese",
-    "caracterizacoes",
-    "propriedades_fisicas",
-    "publicacoes",
 ]
 
 

@@ -1,5 +1,7 @@
 import os
+from datetime import datetime
 from urllib.parse import urlencode, urlparse
+from zoneinfo import ZoneInfo
 
 import requests
 from dotenv import load_dotenv
@@ -12,17 +14,40 @@ from supabase_auth.helpers import generate_pkce_challenge, generate_pkce_verifie
 
 from extracao import (
     listar_locais_openaccess,
+    baixar_pdf_bytes,
     baixar_texto_pdf,
     texto_de_pdf_bytes,
     extrair_campos_com_claude,
     obter_token_publico_orcid,
     listar_publicacoes_orcid,
 )
+from persistencia import garantir_fonte, salvar_amostra
+from simetria import aplicar_em_material, aplicar_restricao
 
 SISTEMAS_CRISTALINOS = ["Selecione...", "Cúbico", "Tetragonal", "Ortorrômbico", "Romboédrico",
                          "Hexagonal", "Monoclínico", "Triclínico"]
-TECNICAS_MEDICAO = ["Selecione...", "DRX laboratório (Cu Kα)", "Síncrotron", "Nêutrons", "Outra"]
+TECNICAS_MEDICAO = ["Selecione...", "DRX laboratório (Cu Kα)", "Síncrotron", "Nêutrons", "Monocristal", "Outra"]
 ATMOSFERAS = ["Selecione...", "Ar", "O2", "N2", "Vácuo"]
+SITES_SUBSTITUICAO = ["Selecione...", "A", "B", "ambos"]
+
+
+BRASILIA = ZoneInfo("America/Sao_Paulo")
+
+
+def formatar_criado_em(valor) -> str:
+    if not valor:
+        return "—"
+    if isinstance(valor, datetime):
+        dt = valor
+    else:
+        texto = str(valor).replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(texto)
+        except ValueError:
+            return str(valor)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+    return dt.astimezone(BRASILIA).strftime("%d/%m/%Y %H:%M")
 
 
 def _get_secret(name: str, default: str | None = None) -> str | None:
@@ -58,7 +83,26 @@ def get_token_orcid_publico():
     return obter_token_publico_orcid()
 
 
-st.set_page_config(page_title="Rede de Materiais", page_icon="🧪", layout="centered")
+st.set_page_config(page_title="Rede de Materiais", page_icon="🧪", layout="wide")
+st.markdown(
+    """
+    <style>
+      .block-container {
+        max-width: 100% !important;
+        padding-top: 1rem;
+        padding-bottom: 1.5rem;
+        padding-left: 2rem;
+        padding-right: 2rem;
+      }
+      div[data-testid="stForm"] {
+        border: 1px solid rgba(49, 51, 63, 0.15);
+        padding: 0.8rem 1rem 1rem;
+      }
+      [data-testid="stHorizontalBlock"] { gap: 1.2rem; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 supabase = get_supabase_client()
 
@@ -82,7 +126,7 @@ def _numero_ou_none(valor) -> float | None:
 
 
 def registrar_extracao(materiais: list[dict]):
-    materiais = [m for m in (materiais or []) if isinstance(m, dict)]
+    materiais = [aplicar_em_material(m) for m in (materiais or []) if isinstance(m, dict)]
     if not materiais:
         st.warning("O artigo foi lido, mas nenhum material foi identificado no texto.")
         return
@@ -256,15 +300,17 @@ def processar_callback():
             (result.user.user_metadata or {}).get("family_name"),
         ])) or None
 
-        supabase.table("professores").upsert(
-            {
-                "user_id": result.user.id,
-                "email": result.user.email or None,
-                "nome": nome,
-                "orcid_id": (result.user.user_metadata or {}).get("sub"),
-            },
-            on_conflict="user_id",
-        ).execute()
+        row = {
+            "user_id": result.user.id,
+            "email": result.user.email or None,
+            "nome": nome,
+            "orcid_id": (result.user.user_metadata or {}).get("sub"),
+        }
+        supabase.table("pesquisadores").upsert(row, on_conflict="user_id").execute()
+        try:
+            supabase.table("professores").upsert(row, on_conflict="user_id").execute()
+        except Exception:
+            pass
 
         st.query_params.clear()
         st.rerun()
@@ -284,10 +330,12 @@ def encerrar_sessao():
     st.session_state.pop("refresh_token", None)
     st.session_state.pop("auth_url", None)
     st.session_state.pop("extraidos", None)
+    st.session_state.pop("fonte_id", None)
+    st.session_state.pop("fonte_titulo", None)
     st.session_state.pop("publicacoes_orcid", None)
 
 
-def get_professor_logado():
+def get_pesquisador_logado():
     try:
         client = cliente_da_sessao()
         if client is None:
@@ -297,65 +345,99 @@ def get_professor_logado():
         if not user:
             encerrar_sessao()
             return None
-        professor = (
-            client.table("professores")
+        resp = (
+            client.table("pesquisadores")
             .select("id, nome, email, orcid_id, aprovado")
             .eq("user_id", user.id)
             .single()
             .execute()
         )
-        return professor.data
+        return resp.data
     except Exception:
         encerrar_sessao()
         return None
 
 
-def executar_extracao_por_doi(doi):
-    urls = listar_locais_openaccess(doi)
-    texto = None
-    for url in urls:
-        texto = baixar_texto_pdf(url)
-        if texto:
-            break
+def anexar_e_extrair(pesquisador, *, doi=None, pdf_bytes=None, nome_arquivo=None):
+    """Garante a fonte (DOI único), guarda o PDF e preenche a extração."""
+    client = cliente_da_sessao()
+    if client is None:
+        raise RuntimeError("Sessão inválida.")
+
+    bytes_pdf = pdf_bytes
+    if bytes_pdf is None and doi:
+        for url in listar_locais_openaccess(doi):
+            bytes_pdf = baixar_pdf_bytes(url)
+            if bytes_pdf:
+                break
+    texto = texto_de_pdf_bytes(bytes_pdf) if bytes_pdf else None
+    if texto is None and doi:
+        # fallback: às vezes o Unpaywall devolve HTML e o texto já tinha sido extraído por URL
+        for url in listar_locais_openaccess(doi):
+            texto = baixar_texto_pdf(url)
+            if texto:
+                break
     if texto is None:
         st.warning(
-            "Não consegui acessar o texto completo automaticamente "
-            "(provável bloqueio da editora). Tente enviar o PDF na aba 'Enviar PDF'."
+            "Não consegui ler o texto do artigo (editora bloqueou ou PDF escaneado). "
+            "Tente enviar o PDF na aba 'Enviar PDF'."
         )
         return
+
+    fonte, ja_existia = garantir_fonte(
+        client,
+        pesquisador["id"],
+        doi=doi,
+        pdf_bytes=bytes_pdf,
+        nome_arquivo=nome_arquivo,
+    )
+    st.session_state["fonte_id"] = fonte["id"]
+    st.session_state["fonte_titulo"] = fonte.get("titulo") or doi or nome_arquivo
+    if ja_existia:
+        quem = (fonte.get("pesquisadores") or {}) if isinstance(fonte.get("pesquisadores"), dict) else {}
+        nome = quem.get("nome") or "outro pesquisador"
+        st.info(
+            f"Este artigo já está na base (DOI único). "
+            f"PDF e metadados reutilizados. Você pode cadastrar amostras nele. "
+            f"Anexado originalmente por {nome}."
+        )
+    else:
+        st.caption("Artigo armazenado no acervo do grupo.")
+
     registrar_extracao(extrair_campos_com_claude(texto))
     st.rerun()
 
 
-def secao_extracao_automatica(professor):
+def secao_extracao_automatica(pesquisador):
     with st.expander("📄 Preencher automaticamente a partir de um artigo", expanded=False):
         tab_doi, tab_upload, tab_orcid = st.tabs(["Colar DOI", "Enviar PDF", "Meus artigos (ORCID)"])
 
         with tab_doi:
             doi = st.text_input("DOI do artigo", key="doi_input")
             if st.button("Buscar e extrair", key="btn_doi") and doi.strip():
-                with st.spinner("Buscando o artigo e extraindo os dados..."):
+                with st.spinner("Buscando o artigo, guardando o PDF e extraindo os dados..."):
                     try:
-                        executar_extracao_por_doi(doi)
+                        anexar_e_extrair(pesquisador, doi=doi.strip())
                     except Exception as e:
                         st.error(f"Erro na extração: {e}")
 
         with tab_upload:
             arquivo = st.file_uploader("PDF do artigo", type="pdf", key="upload_input")
+            doi_upload = st.text_input("DOI (se souber)", key="doi_upload")
             if arquivo and st.button("Extrair campos", key="btn_upload"):
-                with st.spinner("Extraindo os dados do PDF..."):
+                with st.spinner("Armazenando o PDF e extraindo os dados..."):
                     try:
-                        texto = texto_de_pdf_bytes(arquivo.read())
-                        if texto is None:
-                            st.warning("Não consegui ler texto desse PDF (pode ser um PDF escaneado).")
-                        else:
-                            registrar_extracao(extrair_campos_com_claude(texto))
-                            st.rerun()
+                        anexar_e_extrair(
+                            pesquisador,
+                            doi=doi_upload.strip() or None,
+                            pdf_bytes=arquivo.getvalue(),
+                            nome_arquivo=arquivo.name,
+                        )
                     except Exception as e:
                         st.error(f"Erro na extração: {e}")
 
         with tab_orcid:
-            if not professor.get("orcid_id"):
+            if not pesquisador.get("orcid_id"):
                 st.info("Seu ORCID iD não foi encontrado no cadastro. Saia e faça login novamente.")
             else:
                 if st.button("Carregar meus artigos do ORCID"):
@@ -363,7 +445,7 @@ def secao_extracao_automatica(professor):
                         try:
                             token = get_token_orcid_publico()
                             st.session_state["publicacoes_orcid"] = listar_publicacoes_orcid(
-                                professor["orcid_id"], token
+                                pesquisador["orcid_id"], token
                             )
                         except Exception as e:
                             st.error(f"Erro ao buscar publicações: {e}")
@@ -380,109 +462,130 @@ def secao_extracao_automatica(professor):
                         st.caption(f"DOI: {pub['doi']}" if pub["doi"] else "Sem DOI cadastrado no ORCID")
                     with col_b:
                         if pub["doi"] and st.button("Extrair", key=f"extrair_orcid_{i}"):
-                            with st.spinner("Buscando e extraindo..."):
+                            with st.spinner("Buscando, guardando e extraindo..."):
                                 try:
-                                    executar_extracao_por_doi(pub["doi"])
+                                    anexar_e_extrair(pesquisador, doi=pub["doi"])
                                 except Exception as e:
                                     st.error(f"Erro na extração: {e}")
+
+
+def campo_num(label: str, valor, fmt: str = "%.2f", minimo: float | None = 0.0, maximo: float | None = None):
+    """Number input vazio quando a extração não trouxe valor — não mascara ausência com 0,00."""
+    n = _numero_ou_none(valor)
+    kwargs = {"label": label, "value": n, "format": fmt, "placeholder": "—"}
+    if minimo is not None:
+        kwargs["min_value"] = minimo
+    if maximo is not None:
+        kwargs["max_value"] = maximo
+    return st.number_input(**kwargs)
 
 
 def coletar_campos_material(extraido: dict, pr: dict, rs: dict) -> dict:
     # Sem `key=` nos widgets: com key, o Streamlit guarda o valor antigo na sessão
     # e ignora o `value=` vindo da extração automática.
-    st.markdown("**Dados essenciais**")
-    col1, col2 = st.columns(2)
-    with col1:
-        formula = st.text_input(
-            "Fórmula química *",
-            value=extraido.get("formula") or "",
-            placeholder="Ex: Bi0.9Nd0.1FeO3",
-        )
-        nome_comum = st.text_input(
-            "Nome comum (opcional)",
-            value=extraido.get("nome_comum") or "",
-        )
-        sistema_cristalino = st.selectbox(
-            "Sistema cristalino",
-            SISTEMAS_CRISTALINOS,
-            index=idx_selectbox(SISTEMAS_CRISTALINOS, extraido.get("sistema_cristalino")),
-        )
-        grupo_espacial = st.text_input(
-            "Grupo espacial",
-            value=extraido.get("grupo_espacial") or "",
-            placeholder="Ex: R3c",
-        )
-    with col2:
-        a = st.number_input("a (Å)", min_value=0.0, value=_numero(pr.get("a")), format="%.4f")
-        b = st.number_input("b (Å)", min_value=0.0, value=_numero(pr.get("b")), format="%.4f")
-        c = st.number_input("c (Å)", min_value=0.0, value=_numero(pr.get("c")), format="%.4f")
-        alpha = st.number_input("α (°)", min_value=0.0, max_value=180.0, value=_numero(pr.get("alpha"), 90.0), format="%.2f")
-        beta = st.number_input("β (°)", min_value=0.0, max_value=180.0, value=_numero(pr.get("beta"), 90.0), format="%.2f")
-        gamma = st.number_input("γ (°)", min_value=0.0, max_value=180.0, value=_numero(pr.get("gamma"), 90.0), format="%.2f")
+    cela = aplicar_restricao({
+        "a": extraido.get("a") or pr.get("a"),
+        "b": extraido.get("b") or pr.get("b"),
+        "c": extraido.get("c") or pr.get("c"),
+        "alpha": extraido.get("alpha") or pr.get("alpha"),
+        "beta": extraido.get("beta") or pr.get("beta"),
+        "gamma": extraido.get("gamma") or pr.get("gamma"),
+        "sistema_cristalino": extraido.get("sistema_cristalino"),
+        "grupo_espacial": extraido.get("grupo_espacial") or pr.get("grupo_espacial"),
+    })
 
-    tecnica_medicao = st.selectbox(
-        "Técnica de medição dos parâmetros de rede",
-        TECNICAS_MEDICAO,
-        index=idx_selectbox(TECNICAS_MEDICAO, pr.get("tecnica_medicao")),
-    )
-    metodo_sintese = st.text_input(
-        "Rota de síntese (resumo)",
-        value=rs.get("metodo") or "",
-        placeholder="Ex: Reação de estado sólido",
-    )
-
-    with st.expander("+ Mais detalhes do material"):
+    ident, rede, exp = st.columns([1.15, 1, 1.1])
+    with ident:
+        st.markdown("**Identidade**")
+        formula = st.text_input("Fórmula química *", value=extraido.get("formula") or "", placeholder="Bi0.9Nd0.1FeO3")
+        nome_comum = st.text_input("Nome comum", value=extraido.get("nome_comum") or "", placeholder="BFO, BTO")
+        c1, c2 = st.columns(2)
+        with c1:
+            sistema_cristalino = st.selectbox(
+                "Sistema cristalino",
+                SISTEMAS_CRISTALINOS,
+                index=idx_selectbox(SISTEMAS_CRISTALINOS, extraido.get("sistema_cristalino")),
+            )
+        with c2:
+            grupo_espacial = st.text_input(
+                "Grupo espacial",
+                value=extraido.get("grupo_espacial") or "",
+                placeholder="R3c, P4mm",
+            )
+        d1, d2 = st.columns(2)
+        with d1:
+            dopante = st.text_input("Dopante", value=extraido.get("dopante") or "", placeholder="Sm, Co, Nd")
+        with d2:
+            percentual_dopagem = campo_num("Dopagem (%)", extraido.get("percentual_dopagem"), "%.2f", 0.0, 100.0)
+        site_substituicao = st.selectbox(
+            "Sítio de substituição",
+            SITES_SUBSTITUICAO,
+            index=idx_selectbox(SITES_SUBSTITUICAO, extraido.get("site_substituicao")),
+        )
         familia_estrutural = st.text_input(
             "Família estrutural",
             value=extraido.get("familia_estrutural") or "",
-            placeholder="Ex: Perovskita",
+            placeholder="Perovskita",
         )
         aplicacao_alvo = st.text_input(
             "Aplicação-alvo",
             value=extraido.get("aplicacao_alvo") or "",
-            placeholder="Ex: Multiferróico",
+            placeholder="Multiferróico",
         )
-        col3, col4 = st.columns(2)
-        with col3:
-            dopante = st.text_input("Dopante", value=extraido.get("dopante") or "", placeholder="Ex: Nd")
-        with col4:
-            percentual_dopagem = st.number_input(
-                "Percentual de dopagem (%)",
-                min_value=0.0,
-                max_value=100.0,
-                value=_numero(extraido.get("percentual_dopagem")),
-                format="%.2f",
-            )
 
-    with st.expander("+ Mais detalhes da síntese"):
+    with rede:
+        st.markdown("**Cela unitária**")
+        a = campo_num("a (Å)", cela.get("a"), "%.4f")
+        b = campo_num("b (Å)", cela.get("b"), "%.4f")
+        c = campo_num("c (Å)", cela.get("c"), "%.4f")
+        alpha = campo_num("α (°)", cela.get("alpha"), "%.2f", 0.0, 180.0)
+        beta = campo_num("β (°)", cela.get("beta"), "%.2f", 0.0, 180.0)
+        gamma = campo_num("γ (°)", cela.get("gamma"), "%.2f", 0.0, 180.0)
+
+    with exp:
+        st.markdown("**Medida e síntese**")
+        tecnica_medicao = st.selectbox(
+            "Técnica",
+            TECNICAS_MEDICAO,
+            index=idx_selectbox(TECNICAS_MEDICAO, pr.get("tecnica_medicao")),
+        )
+        temperatura_k = campo_num("T da medida (K)", pr.get("temperatura_k"), "%.1f")
+        metodo_sintese = st.text_input(
+            "Método de síntese",
+            value=rs.get("metodo") or "",
+            placeholder="Sol-gel, Czochralski, estado sólido",
+        )
         precursores = st.text_area(
             "Precursores",
             value=rs.get("precursores") or "",
-            placeholder="Ex: Bi2O3, Nd2O3, Fe2O3",
+            placeholder="Bi2O3, Nd2O3, Fe2O3",
+            height=70,
         )
-        col5, col6 = st.columns(2)
-        with col5:
-            temp_calcinacao = st.number_input(
-                "Temperatura de calcinação (°C)", min_value=0.0,
-                value=_numero(rs.get("temp_calcinacao")), format="%.1f",
-            )
-            taxa_aquecimento = st.number_input(
-                "Taxa de aquecimento (°C/min)", min_value=0.0,
-                value=_numero(rs.get("taxa_aquecimento")), format="%.2f",
-            )
-            atmosfera = st.selectbox(
-                "Atmosfera", ATMOSFERAS,
-                index=idx_selectbox(ATMOSFERAS, rs.get("atmosfera")),
-            )
-        with col6:
-            tempo_calcinacao = st.number_input(
-                "Tempo de calcinação (h)", min_value=0.0,
-                value=_numero(rs.get("tempo_calcinacao")), format="%.1f",
-            )
-            taxa_resfriamento = st.number_input(
-                "Taxa de resfriamento (°C/min)", min_value=0.0,
-                value=_numero(rs.get("taxa_resfriamento")), format="%.2f",
-            )
+        atmosfera = st.selectbox(
+            "Atmosfera",
+            ATMOSFERAS,
+            index=idx_selectbox(ATMOSFERAS, rs.get("atmosfera")),
+        )
+
+    st.markdown("**Forno**")
+    f1, f2, f3, f4, f5, f6 = st.columns(6)
+    with f1:
+        temp_calcinacao = campo_num("T calcinação (°C)", rs.get("temp_calcinacao"), "%.1f")
+    with f2:
+        tempo_calcinacao = campo_num("t calcinação (h)", rs.get("tempo_calcinacao"), "%.2f")
+    with f3:
+        temp_sinterizacao = campo_num("T sinterização (°C)", rs.get("temp_sinterizacao"), "%.1f")
+    with f4:
+        tempo_sinterizacao = campo_num("t sinterização (h)", rs.get("tempo_sinterizacao"), "%.2f")
+    with f5:
+        taxa_aquecimento = campo_num("Aquecimento (°C/min)", rs.get("taxa_aquecimento"), "%.2f")
+    with f6:
+        taxa_resfriamento = campo_num("Resfriamento (°C/min)", rs.get("taxa_resfriamento"), "%.2f")
+    observacao = st.text_input(
+        "Observação da síntese",
+        value=rs.get("observacao") or "",
+        placeholder="Fast firing, esfera 140 µm, cristal comercial 99.99%",
+    )
 
     return {
         "formula": formula.strip(),
@@ -492,17 +595,22 @@ def coletar_campos_material(extraido: dict, pr: dict, rs: dict) -> dict:
         "familia_estrutural": familia_estrutural.strip() or None,
         "aplicacao_alvo": aplicacao_alvo.strip() or None,
         "dopante": dopante.strip() or None,
-        "percentual_dopagem": percentual_dopagem or None,
-        "a": a or None, "b": b or None, "c": c or None,
+        "percentual_dopagem": percentual_dopagem,
+        "site_substituicao": None if site_substituicao == "Selecione..." else site_substituicao,
+        "a": a, "b": b, "c": c,
         "alpha": alpha, "beta": beta, "gamma": gamma,
         "tecnica_medicao": None if tecnica_medicao == "Selecione..." else tecnica_medicao,
+        "temperatura_k": temperatura_k,
         "metodo": metodo_sintese.strip() or None,
         "precursores": precursores.strip() or None,
-        "temp_calcinacao": temp_calcinacao or None,
-        "tempo_calcinacao": tempo_calcinacao or None,
-        "taxa_aquecimento": taxa_aquecimento or None,
-        "taxa_resfriamento": taxa_resfriamento or None,
+        "temp_calcinacao": temp_calcinacao,
+        "tempo_calcinacao": tempo_calcinacao,
+        "temp_sinterizacao": temp_sinterizacao,
+        "tempo_sinterizacao": tempo_sinterizacao,
+        "taxa_aquecimento": taxa_aquecimento,
+        "taxa_resfriamento": taxa_resfriamento,
         "atmosfera": None if atmosfera == "Selecione..." else atmosfera,
+        "observacao": observacao.strip() or None,
     }
 
 
@@ -514,97 +622,14 @@ def validar_campos_material(campos: dict) -> str | None:
     return None
 
 
-def dados_tabela_material(professor_id, campos: dict) -> dict:
-    return {
-        "professor_id": professor_id,
-        "formula": campos["formula"],
-        "nome_comum": campos["nome_comum"],
-        "sistema_cristalino": campos["sistema_cristalino"],
-        "grupo_espacial": campos["grupo_espacial"],
-        "familia_estrutural": campos["familia_estrutural"],
-        "aplicacao_alvo": campos["aplicacao_alvo"],
-        "dopante": campos["dopante"],
-        "percentual_dopagem": campos["percentual_dopagem"],
-    }
+def dados_tabela_material(pesquisador_id, campos: dict) -> dict:
+    return campos
 
 
-COLUNAS_CONDICAO = ("condicao", "temperatura_k")
-
-
-def inserir_parametros_rede(client, linhas: list[dict]):
-    """Grava as medidas. Se o banco ainda não tem as colunas de condição, regrava sem elas."""
-    if not linhas:
-        return
-    try:
-        client.table("parametros_rede").insert(linhas).execute()
-    except Exception:
-        simples = [
-            {k: v for k, v in linha.items() if k not in COLUNAS_CONDICAO}
-            for linha in linhas
-        ]
-        client.table("parametros_rede").insert(simples).execute()
-
-
-def linha_de_medida(material_id, medida: dict) -> dict | None:
-    a = _numero_ou_none(medida.get("a"))
-    b = _numero_ou_none(medida.get("b"))
-    c = _numero_ou_none(medida.get("c"))
-    if not (a or b or c):
-        return None
-    tecnica = medida.get("tecnica_medicao")
-    return {
-        "material_id": material_id,
-        "a": a, "b": b, "c": c,
-        "alpha": _numero_ou_none(medida.get("alpha")),
-        "beta": _numero_ou_none(medida.get("beta")),
-        "gamma": _numero_ou_none(medida.get("gamma")),
-        "tecnica_medicao": tecnica if tecnica in TECNICAS_MEDICAO[1:] else None,
-        "condicao": medida.get("condicao") or None,
-        "temperatura_k": _numero_ou_none(medida.get("temperatura_k")),
-    }
-
-
-def gravar_filhos_material(client, material_id, campos: dict, medidas: list[dict] | None = None):
-    medidas = list(medidas or [])
-    linhas = []
-
-    if campos["a"] or campos["b"] or campos["c"]:
-        principal = {
-            "material_id": material_id,
-            "a": campos["a"], "b": campos["b"], "c": campos["c"],
-            "alpha": campos["alpha"], "beta": campos["beta"], "gamma": campos["gamma"],
-            "tecnica_medicao": campos["tecnica_medicao"],
-            "condicao": (medidas[0].get("condicao") if medidas else None) or None,
-            "temperatura_k": _numero_ou_none(medidas[0].get("temperatura_k")) if medidas else None,
-        }
-        linhas.append(principal)
-
-    # A primeira medida já foi para o formulário; as demais entram como estavam no artigo.
-    for medida in medidas[1:]:
-        linha = linha_de_medida(material_id, medida)
-        if linha:
-            linhas.append(linha)
-
-    inserir_parametros_rede(client, linhas)
-
-    rota = {
-        "metodo": campos["metodo"],
-        "precursores": campos["precursores"],
-        "temp_calcinacao": campos["temp_calcinacao"],
-        "tempo_calcinacao": campos["tempo_calcinacao"],
-        "taxa_aquecimento": campos["taxa_aquecimento"],
-        "taxa_resfriamento": campos["taxa_resfriamento"],
-        "atmosfera": campos["atmosfera"],
-    }
-    existente_rs = (
-        client.table("rota_sintese").select("id").eq("material_id", material_id).limit(1).execute()
-    )
-    tem_rota = campos["metodo"] or campos["precursores"]
-    if tem_rota or existente_rs.data:
-        if existente_rs.data:
-            client.table("rota_sintese").update(rota).eq("id", existente_rs.data[0]["id"]).execute()
-        elif tem_rota:
-            client.table("rota_sintese").insert({"material_id": material_id, **rota}).execute()
+def salvar_material(client, pesquisador_id, campos: dict, medidas: list[dict] | None = None):
+    fonte_id = st.session_state.get("fonte_id")
+    campos = aplicar_restricao(campos)
+    salvar_amostra(client, pesquisador_id, campos, medidas, fonte_id)
 
 
 def campos_de_extraido(item: dict) -> dict:
@@ -615,37 +640,37 @@ def campos_de_extraido(item: dict) -> dict:
     sistema = item.get("sistema_cristalino") or pr.get("sistema_cristalino")
     tecnica = pr.get("tecnica_medicao")
     atmosfera = rs.get("atmosfera")
+    sim = aplicar_restricao({**pr, "sistema_cristalino": sistema, "grupo_espacial": item.get("grupo_espacial") or pr.get("grupo_espacial")})
     return {
         "formula": (item.get("formula") or "").strip(),
         "nome_comum": (item.get("nome_comum") or "").strip() or None,
-        "sistema_cristalino": sistema if sistema in SISTEMAS_CRISTALINOS[1:] else None,
+        "sistema_cristalino": sim.get("sistema_cristalino") if sim.get("sistema_cristalino") in SISTEMAS_CRISTALINOS[1:] else None,
         "grupo_espacial": (item.get("grupo_espacial") or pr.get("grupo_espacial") or "").strip() or None,
         "familia_estrutural": (item.get("familia_estrutural") or "").strip() or None,
         "aplicacao_alvo": (item.get("aplicacao_alvo") or "").strip() or None,
         "dopante": (item.get("dopante") or "").strip() or None,
         "percentual_dopagem": _numero_ou_none(item.get("percentual_dopagem")),
-        "a": _numero_ou_none(pr.get("a")),
-        "b": _numero_ou_none(pr.get("b")),
-        "c": _numero_ou_none(pr.get("c")),
-        "alpha": _numero_ou_none(pr.get("alpha")),
-        "beta": _numero_ou_none(pr.get("beta")),
-        "gamma": _numero_ou_none(pr.get("gamma")),
+        "x_nominal": _numero_ou_none(item.get("x_nominal")),
+        "site_substituicao": item.get("site_substituicao") if item.get("site_substituicao") in SITES_SUBSTITUICAO[1:] else None,
+        "a": _numero_ou_none(sim.get("a")),
+        "b": _numero_ou_none(sim.get("b")),
+        "c": _numero_ou_none(sim.get("c")),
+        "alpha": _numero_ou_none(sim.get("alpha")),
+        "beta": _numero_ou_none(sim.get("beta")),
+        "gamma": _numero_ou_none(sim.get("gamma")),
         "tecnica_medicao": tecnica if tecnica in TECNICAS_MEDICAO[1:] else None,
+        "temperatura_k": _numero_ou_none(pr.get("temperatura_k")),
         "metodo": (rs.get("metodo") or "").strip() or None,
         "precursores": (rs.get("precursores") or "").strip() or None,
         "temp_calcinacao": _numero_ou_none(rs.get("temp_calcinacao")),
         "tempo_calcinacao": _numero_ou_none(rs.get("tempo_calcinacao")),
+        "temp_sinterizacao": _numero_ou_none(rs.get("temp_sinterizacao")),
+        "tempo_sinterizacao": _numero_ou_none(rs.get("tempo_sinterizacao")),
         "taxa_aquecimento": _numero_ou_none(rs.get("taxa_aquecimento")),
         "taxa_resfriamento": _numero_ou_none(rs.get("taxa_resfriamento")),
         "atmosfera": atmosfera if atmosfera in ATMOSFERAS[1:] else None,
+        "observacao": (rs.get("observacao") or "").strip() or None,
     }
-
-
-def salvar_material(client, professor_id, campos: dict, medidas: list[dict] | None = None):
-    material = client.table("materiais").insert(
-        dados_tabela_material(professor_id, campos)
-    ).execute()
-    gravar_filhos_material(client, material.data[0]["id"], campos, medidas)
 
 
 def resumo_medidas(medidas: list[dict]) -> list[dict]:
@@ -706,7 +731,7 @@ def secao_extraidos() -> tuple[int, dict]:
     return indice, atual
 
 
-def salvar_todos_extraidos(client, professor):
+def salvar_todos_extraidos(client, pesquisador):
     extraidos = st.session_state.get("extraidos") or []
     if not extraidos:
         return
@@ -724,11 +749,10 @@ def salvar_todos_extraidos(client, professor):
             falhas.append("material sem fórmula")
             continue
         if not (item.get("medidas") or item.get("rota_sintese")):
-            # Composto apenas citado no artigo: só a fórmula, nada a registrar.
             pulados.append(campos["formula"])
             continue
         try:
-            salvar_material(client, professor["id"], campos, item.get("medidas"))
+            salvar_material(client, pesquisador["id"], campos, item.get("medidas"))
             salvos += 1
         except Exception as e:
             falhas.append(f"{campos['formula']}: {e}")
@@ -749,38 +773,67 @@ def salvar_todos_extraidos(client, professor):
 def listar_materiais(client) -> list[dict]:
     try:
         resp = (
-            client.table("materiais")
+            client.table("amostras")
             .select(
-                "id, professor_id, formula, nome_comum, sistema_cristalino, "
-                "grupo_espacial, criado_em, professores(nome, email)"
+                "id, rotulo, criado_em, inserido_por, "
+                "composicoes(formula, nome_comum, dopante, percentual_dopagem), "
+                "pesquisadores(nome, email), "
+                "fontes(doi, titulo), "
+                "medidas_estruturais(sistema_cristalino, grupo_espacial_hm, a, b, c, temperatura_k)"
             )
             .order("criado_em", desc=True)
             .execute()
         )
-        linhas = []
-        for m in resp.data or []:
-            prof = m.get("professores") or {}
-            if isinstance(prof, list):
-                prof = prof[0] if prof else {}
-            linhas.append({
-                "id": m["id"],
-                "professor_id": m["professor_id"],
-                "formula": m.get("formula"),
-                "nome_comum": m.get("nome_comum"),
-                "sistema_cristalino": m.get("sistema_cristalino"),
-                "grupo_espacial": m.get("grupo_espacial"),
-                "criado_em": m.get("criado_em"),
-                "professor": (prof or {}).get("nome") or (prof or {}).get("email") or "—",
-            })
-        return linhas
+        dados = resp.data or []
     except Exception:
         resp = (
-            client.table("materiais")
-            .select("id, professor_id, formula, nome_comum, sistema_cristalino, grupo_espacial, criado_em")
+            client.table("amostras")
+            .select("id, rotulo, criado_em, composicao_id, inserido_por, fonte_id")
             .order("criado_em", desc=True)
             .execute()
         )
-        return [{**m, "professor": "—"} for m in (resp.data or [])]
+        dados = resp.data or []
+        linhas = []
+        for m in dados:
+            linhas.append({
+                "id": m["id"],
+                "formula": m.get("rotulo"),
+                "nome_comum": None,
+                "sistema_cristalino": None,
+                "grupo_espacial": None,
+                "n_medidas": None,
+                "doi": None,
+                "criado_em": m.get("criado_em"),
+                "pesquisador": "—",
+            })
+        return linhas
+    linhas = []
+    for m in dados:
+        comp = m.get("composicoes") or {}
+        if isinstance(comp, list):
+            comp = comp[0] if comp else {}
+        pesq = m.get("pesquisadores") or {}
+        if isinstance(pesq, list):
+            pesq = pesq[0] if pesq else {}
+        fonte = m.get("fontes") or {}
+        if isinstance(fonte, list):
+            fonte = fonte[0] if fonte else {}
+        medidas = m.get("medidas_estruturais") or []
+        if isinstance(medidas, dict):
+            medidas = [medidas]
+        primeira = medidas[0] if medidas else {}
+        linhas.append({
+            "id": m["id"],
+            "formula": (comp or {}).get("formula") or m.get("rotulo"),
+            "nome_comum": (comp or {}).get("nome_comum"),
+            "sistema_cristalino": primeira.get("sistema_cristalino"),
+            "grupo_espacial": primeira.get("grupo_espacial_hm"),
+            "n_medidas": len(medidas),
+            "doi": (fonte or {}).get("doi"),
+            "criado_em": m.get("criado_em"),
+            "pesquisador": (pesq or {}).get("nome") or (pesq or {}).get("email") or "—",
+        })
+    return linhas
 
 
 def secao_acervo(client):
@@ -802,8 +855,8 @@ def secao_acervo(client):
         sistemas = ["Todos"] + sorted({m.get("sistema_cristalino") for m in linhas if m.get("sistema_cristalino")})
         sistema = st.selectbox("Sistema cristalino", sistemas, key="filtro_sistema")
     with col_p:
-        professores = ["Todos"] + sorted({m.get("professor") for m in linhas if m.get("professor") and m.get("professor") != "—"})
-        autor = st.selectbox("Professor", professores, key="filtro_professor")
+        autores = ["Todos"] + sorted({m.get("pesquisador") for m in linhas if m.get("pesquisador") and m.get("pesquisador") != "—"})
+        autor = st.selectbox("Pesquisador", autores, key="filtro_pesquisador")
 
     filtradas = linhas
     if termo.strip():
@@ -817,7 +870,7 @@ def secao_acervo(client):
     if sistema != "Todos":
         filtradas = [m for m in filtradas if m.get("sistema_cristalino") == sistema]
     if autor != "Todos":
-        filtradas = [m for m in filtradas if m.get("professor") == autor]
+        filtradas = [m for m in filtradas if m.get("pesquisador") == autor]
 
     st.caption(f"{len(filtradas)} de {len(linhas)} material(is)")
     visivel = [
@@ -826,19 +879,23 @@ def secao_acervo(client):
             "Nome": m.get("nome_comum"),
             "Sistema": m.get("sistema_cristalino"),
             "Grupo": m.get("grupo_espacial"),
-            "Professor": m.get("professor"),
-            "Criado em": m.get("criado_em"),
+            "Medidas": m.get("n_medidas"),
+            "DOI": m.get("doi"),
+            "Pesquisador": m.get("pesquisador"),
+            "Criado em": formatar_criado_em(m.get("criado_em")),
         }
         for m in filtradas
     ]
     st.dataframe(visivel, hide_index=True, width="stretch")
 
 
-def formulario_material(professor):
+def formulario_material(pesquisador):
     st.title("🧪 Rede de Materiais")
     col_a, col_b = st.columns([4, 1])
     with col_a:
-        st.caption(f"Logado como {professor['nome'] or professor['email'] or 'professor'}")
+        st.caption(f"Logado como {pesquisador['nome'] or pesquisador['email'] or 'pesquisador'}")
+        if st.session_state.get("fonte_titulo"):
+            st.caption(f"Artigo anexado: {st.session_state['fonte_titulo']}")
     with col_b:
         if st.button("Sair"):
             encerrar_sessao()
@@ -846,9 +903,9 @@ def formulario_material(professor):
             st.rerun()
 
     st.divider()
-    st.subheader("Cadastrar material")
+    st.subheader("Cadastrar amostra")
 
-    secao_extracao_automatica(professor)
+    secao_extracao_automatica(pesquisador)
 
     indice, extraido = secao_extraidos()
     medidas = extraido.get("medidas") or []
@@ -868,7 +925,7 @@ def formulario_material(professor):
         return
 
     if len(st.session_state.get("extraidos") or []) > 1:
-        salvar_todos_extraidos(client, professor)
+        salvar_todos_extraidos(client, pesquisador)
 
     with st.form("form_material", clear_on_submit=True):
         campos = coletar_campos_material(extraido, pr, rs)
@@ -880,7 +937,7 @@ def formulario_material(professor):
                 st.error(erro)
                 return
             try:
-                salvar_material(client, professor["id"], campos, medidas)
+                salvar_material(client, pesquisador["id"], campos, medidas)
             except Exception as e:
                 st.error(f"Erro ao salvar no Supabase: {e}")
                 return
@@ -892,7 +949,7 @@ def formulario_material(professor):
                 st.session_state["extraidos"] = restantes
             else:
                 st.session_state.pop("extraidos", None)
-            st.success(f"Material '{campos['formula']}' salvo com sucesso!")
+            st.success(f"Amostra '{campos['formula']}' salva com sucesso!")
             st.rerun()
 
     st.divider()
@@ -915,19 +972,19 @@ if processar_callback():
     st.stop()
 
 if "access_token" in st.session_state:
-    professor = get_professor_logado()
-    if professor and professor.get("aprovado") is False:
+    pesquisador = get_pesquisador_logado()
+    if pesquisador and pesquisador.get("aprovado") is False:
         cabecalho_institucional()
         st.title("🧪 Rede de Materiais")
         st.info(
             "Sua conta foi criada e aguarda aprovação. "
-            "Quando for liberada, você poderá cadastrar materiais."
+            "Quando for liberada, você poderá cadastrar amostras."
         )
         if st.button("Sair"):
             encerrar_sessao()
             st.rerun()
-    elif professor:
-        formulario_material(professor)
+    elif pesquisador:
+        formulario_material(pesquisador)
     else:
         st.warning("Sessão expirada ou inválida. Entre novamente com o ORCID.")
         fazer_login()

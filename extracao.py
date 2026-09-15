@@ -89,14 +89,20 @@ def listar_locais_openaccess(doi: str) -> list[str]:
     return urls
 
 
-def baixar_texto_pdf(pdf_url: str) -> str | None:
+def baixar_pdf_bytes(pdf_url: str) -> bytes | None:
     headers = {"User-Agent": "Mozilla/5.0 (compatible; ConsciênciaDeMateriais/1.0)"}
     resp = requests.get(pdf_url, headers=headers, timeout=30, allow_redirects=True)
     content_type = resp.headers.get("Content-Type", "")
     parece_pdf = "pdf" in content_type.lower() or resp.content.startswith(b"%PDF")
     if resp.status_code != 200 or not parece_pdf:
         return None
-    return texto_de_pdf_bytes(resp.content)
+    return resp.content
+
+
+def baixar_texto_pdf(pdf_url: str) -> str | None:
+    conteudo = baixar_pdf_bytes(pdf_url)
+    return texto_de_pdf_bytes(conteudo) if conteudo else None
+
 
 
 def texto_de_pdf_bytes(pdf_bytes: bytes) -> str | None:
@@ -112,24 +118,38 @@ PROMPT_EXTRACAO = """Leia o texto de artigo científico de ciência de materiais
 ferramenta "registrar_materiais_do_artigo" com tudo que você conseguir identificar.
 
 Um artigo quase nunca descreve um único conjunto de dados. Não resuma: registre todas as
-composições e todas as medidas estruturais relatadas.
+composições, todas as medidas estruturais e a rota de síntese.
 
 Como separar materiais de medidas:
 - Cada COMPOSIÇÃO química distinta é um material próprio. Séries de dopagem (x = 0,01; 0,05; 0,10 ...)
-  geram um material por valor de x, cada um com sua fórmula e seu percentual de dopagem.
+  geram um material por valor de x, cada um com sua fórmula, dopante, x_nominal (fração) e
+  percentual_dopagem (em %, ou seja 1,0 para x=0,01 — nunca grave a fração no campo de percentual).
 - A MESMA composição medida em condições diferentes (temperaturas, fases, pressões, técnicas)
   é um único material com várias entradas em "medidas".
 - Se o artigo traz uma tabela com N temperaturas, registre as N medidas, não apenas a primeira.
   Em "condicao", identifique a medida como o artigo a identifica (ex.: "298 K", "fase cúbica a 473 K").
 
+Síntese — preencha rota_sintese sempre que o experimental existir:
+- metodo: sol-gel, estado sólido, Czochralski, moagem de alta energia, etc.
+- precursores: lista de reagentes (Bi2O3, Fe2O3, nitratos, etilenoglicol...).
+- Distinga calcinação de sinterização. Co-BFO 890 °C / 3 min é sinterização, não calcinação.
+- atmosfera: Ar, O2, N2 ou Vácuo. Cristal comercial / Czochralski: metodo preenchido;
+  deixe temperaturas de forno de fora se o artigo não calcinou/sinterizou o pó.
+- observacao: detalhes (esfera 140 µm, fast firing, cristal 99.99%).
+
+Dopagem:
+- dopante = elemento (Sm, Co, Nd). Composto puro: omita dopante e percentual.
+- site_substituicao = A, B ou ambos (Sm no Bi = A; Co no Fe = B).
+
 Outras regras:
 - Registre apenas os materiais preparados ou caracterizados neste trabalho. Compostos citados
   só como referência, comparação ou contexto histórico não entram na lista.
-- Se um valor não aparecer explicitamente no texto, deixe o campo de fora (não invente ou estime valores).
+- Se um valor não aparecer explicitamente no texto, deixe o campo de fora (não invente, não use 0).
 - A técnica de medida normalmente vale para a série inteira: repita o mesmo valor de
-  "tecnica_medicao" em todas as medidas do material, em vez de usar "Outra" a partir da segunda.
+  "tecnica_medicao" em todas as medidas. DRX de monocristal = "Monocristal".
 - Parâmetros de rede em Ångström (Å), ângulos em graus.
-- Temperatura de medida em kelvin; temperaturas de síntese em Celsius; tempos em horas.
+- Temperatura de medida em kelvin; temperaturas de síntese em Celsius; tempos em horas
+  (3 min = 0,05 h).
 
 Texto do artigo:
 {texto}
@@ -137,7 +157,7 @@ Texto do artigo:
 
 SISTEMAS = ["Cúbico", "Tetragonal", "Ortorrômbico", "Romboédrico",
             "Hexagonal", "Monoclínico", "Triclínico"]
-TECNICAS = ["DRX laboratório (Cu Kα)", "Síncrotron", "Nêutrons", "Outra"]
+TECNICAS = ["DRX laboratório (Cu Kα)", "Síncrotron", "Nêutrons", "Monocristal", "Outra"]
 
 ESQUEMA_MEDIDA = {
     "type": "object",
@@ -169,19 +189,27 @@ ESQUEMA_MATERIAL = {
         "grupo_espacial": {"type": "string"},
         "familia_estrutural": {"type": "string"},
         "aplicacao_alvo": {"type": "string"},
-        "dopante": {"type": "string"},
-        "percentual_dopagem": {"type": "number"},
+        "dopante": {"type": "string", "description": "Elemento dopante. Omitir se o composto for puro."},
+        "percentual_dopagem": {
+            "type": "number",
+            "description": "Dopagem em porcentagem atômica (1.0 para x=0.01). Não use a fração x aqui.",
+        },
+        "x_nominal": {"type": "number", "description": "Fração estequiométrica x (0.01, 0.12)."},
+        "site_substituicao": {"type": "string", "enum": ["A", "B", "ambos"]},
         "medidas": {"type": "array", "items": ESQUEMA_MEDIDA},
         "rota_sintese": {
             "type": "object",
             "properties": {
                 "metodo": {"type": "string"},
                 "precursores": {"type": "string"},
-                "temp_calcinacao": {"type": "number"},
-                "tempo_calcinacao": {"type": "number"},
-                "taxa_aquecimento": {"type": "number"},
-                "taxa_resfriamento": {"type": "number"},
+                "temp_calcinacao": {"type": "number", "description": "°C"},
+                "tempo_calcinacao": {"type": "number", "description": "horas"},
+                "temp_sinterizacao": {"type": "number", "description": "°C"},
+                "tempo_sinterizacao": {"type": "number", "description": "horas"},
+                "taxa_aquecimento": {"type": "number", "description": "°C/min"},
+                "taxa_resfriamento": {"type": "number", "description": "°C/min"},
                 "atmosfera": {"type": "string", "enum": ["Ar", "O2", "N2", "Vácuo"]},
+                "observacao": {"type": "string"},
             },
         },
     },
