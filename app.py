@@ -574,7 +574,9 @@ def coletar_campos_material(extraido: dict, pr: dict, rs: dict) -> dict:
         )
         equiv_k = para_kelvin(temperatura_c)
         if equiv_k is not None:
-            st.caption(f"{equiv_k:.1f} K")
+            st.caption(f"{equiv_k:.1f} K — T do DRX/refinamento, não do forno.")
+        else:
+            st.caption("Deixe vazio se o artigo não informar a T do difratograma.")
         metodo_sintese = st.text_input(
             "Método de síntese",
             value=rs.get("metodo") or "",
@@ -702,8 +704,8 @@ def resumo_medidas(medidas: list[dict]) -> list[dict]:
     return [
         {
             "Condição": m.get("condicao") or "—",
-            "T (°C)": para_celsius(m.get("temperatura_k")),
-            "T (K)": m.get("temperatura_k"),
+            "T DRX (°C)": para_celsius(m.get("temperatura_k")),
+            "T DRX (K)": m.get("temperatura_k"),
             "Sistema": m.get("sistema_cristalino"),
             "Grupo": m.get("grupo_espacial"),
             "a (Å)": m.get("a"),
@@ -839,6 +841,7 @@ def listar_materiais(client) -> list[dict]:
                 "composicoes(formula, nome_comum, dopante, percentual_dopagem), "
                 "pesquisadores(nome, email), "
                 "fontes(doi, titulo, arquivo_path, arquivo_nome_original), "
+                "rotas_sintese(temp_calcinacao, temp_sinterizacao, metodo), "
                 "medidas_estruturais(condicao, temperatura_k, sistema_cristalino, "
                 "grupo_espacial_hm, a, b, c, tecnica_medicao)"
             )
@@ -868,6 +871,8 @@ def listar_materiais(client) -> list[dict]:
                 "pdf": False,
                 "arquivo_path": None,
                 "medidas": [],
+                "temp_sinterizacao": None,
+                "temp_calcinacao": None,
                 "criado_em": m.get("criado_em"),
                 "pesquisador": "—",
             })
@@ -877,6 +882,7 @@ def listar_materiais(client) -> list[dict]:
         comp = _como_dict(m.get("composicoes"))
         pesq = _como_dict(m.get("pesquisadores"))
         fonte = _como_dict(m.get("fontes"))
+        rota = _como_dict(m.get("rotas_sintese"))
         medidas = _como_lista(m.get("medidas_estruturais"))
         medidas = sorted(
             medidas,
@@ -895,6 +901,8 @@ def listar_materiais(client) -> list[dict]:
             "pdf": bool(fonte.get("arquivo_path")),
             "arquivo_path": fonte.get("arquivo_path"),
             "medidas": medidas,
+            "temp_sinterizacao": rota.get("temp_sinterizacao"),
+            "temp_calcinacao": rota.get("temp_calcinacao"),
             "criado_em": m.get("criado_em"),
             "pesquisador": pesq.get("nome") or pesq.get("email") or "—",
         })
@@ -966,12 +974,15 @@ def secao_acervo(client):
     atual = filtradas[rotulos.index(escolha)]
     medidas = atual.get("medidas") or []
 
+    partes = [atual.get("formula"), atual.get("nome_comum") or "sem nome comum"]
+    if atual.get("temp_sinterizacao") is not None:
+        partes.append(f"sinterização {atual['temp_sinterizacao']:g} °C")
+    elif atual.get("temp_calcinacao") is not None:
+        partes.append(f"calcinação {atual['temp_calcinacao']:g} °C")
+    partes.append("PDF no Storage" if atual.get("pdf") else "sem PDF")
     col_info, col_pdf = st.columns([3, 1])
     with col_info:
-        st.caption(
-            f"{atual.get('formula')} · {atual.get('nome_comum') or 'sem nome comum'} · "
-            f"{'PDF no Storage' if atual.get('pdf') else 'sem PDF'}"
-        )
+        st.caption(" · ".join(str(p) for p in partes))
     with col_pdf:
         url = url_assinada_pdf(client, atual.get("arquivo_path")) if atual.get("pdf") else None
         if url:
@@ -985,8 +996,8 @@ def secao_acervo(client):
         [
             {
                 "Condição": m.get("condicao") or "—",
-                "T (°C)": para_celsius(m.get("temperatura_k")),
-                "T (K)": m.get("temperatura_k"),
+                "T DRX (°C)": para_celsius(m.get("temperatura_k")),
+                "T DRX (K)": m.get("temperatura_k"),
                 "Sistema": m.get("sistema_cristalino") or "—",
                 "Grupo": m.get("grupo_espacial_hm") or "—",
                 "a (Å)": m.get("a"),

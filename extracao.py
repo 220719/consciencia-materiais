@@ -128,7 +128,8 @@ Como separar materiais de medidas:
 - A MESMA composição medida em condições diferentes (temperaturas, fases, pressões, técnicas)
   é um único material com várias entradas em "medidas".
 - Se o artigo traz uma tabela com N temperaturas, registre as N medidas, não apenas a primeira.
-  Em "condicao", identifique a medida como o artigo a identifica (ex.: "25 °C", "298 K", "fase cúbica a 200 °C").
+  Em "condicao", identifique a medida como o artigo a identifica (ex.: "298 K", "fase cúbica a 473 K").
+  Se o artigo não nomear a condição, omita o campo.
 
 Síntese — preencha rota_sintese sempre que o experimental existir:
 - metodo: sol-gel, estado sólido, Czochralski, moagem de alta energia, etc.
@@ -149,10 +150,13 @@ Outras regras:
 - A técnica de medida normalmente vale para a série inteira: repita o mesmo valor de
   "tecnica_medicao" em todas as medidas. DRX de monocristal = "Monocristal".
 - Parâmetros de rede em Ångström (Å), ângulos em graus.
-- Temperatura de MEDIDA estrutural (DRX/Rietveld): se o artigo der em °C, preencha
-  temperatura_c; se der em K, preencha temperatura_k. Ambiente / room temperature /
-  lab XRD sem número = temperatura_c 25. Nunca coloque temperatura de forno
-  (calcinação/sinterização, ex. 890 °C) neste campo.
+- Temperatura de MEDIDA estrutural (DRX/Rietveld) NÃO é temperatura de forno.
+  Só preencha temperatura_c ou temperatura_k se o artigo disser a T do difratograma
+  ou da tabela de parâmetros de rede (ex.: série 298–778 K, HT-XRD a 200 °C).
+  Se o DRX for de laboratório e o texto NÃO der a T da medida, omita os dois campos
+  e omita "temperatura ambiente". NUNCA invente 25 °C nem 298 K.
+  890 °C / 3 min de fast firing, calcinação ou sinterização vai SOMENTE para
+  rota_sintese (temp_sinterizacao / temp_calcinacao), nunca para medidas.
 - Temperaturas de síntese sempre em Celsius; tempos em horas (3 min = 0,05 h).
 
 Texto do artigo:
@@ -173,11 +177,11 @@ ESQUEMA_MEDIDA = {
         },
         "temperatura_c": {
             "type": "number",
-            "description": "Temperatura da medida em °C. Use este campo se o artigo (ou o padrão de laboratório) estiver em Celsius.",
+            "description": "T do DRX/refinamento em °C, só se o artigo informar esse número. Não use T de forno. Não invente 25.",
         },
         "temperatura_k": {
             "type": "number",
-            "description": "Temperatura da medida em kelvin. Use só se o artigo reportar explicitamente em K.",
+            "description": "T do DRX/refinamento em kelvin, só se o artigo informar em K (tabela vs T). Não invente 298.",
         },
         "temperatura_unidade": {
             "type": "string",
