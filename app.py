@@ -24,6 +24,7 @@ from extracao import (
 from persistencia import garantir_fonte, salvar_amostra
 from simetria import aplicar_em_material, aplicar_restricao, campos_fixos, sistema_de_grupo
 from unidades import para_celsius, para_kelvin, temperatura_medida_para_k
+from apresentacao import linha_tabela_medida
 
 SISTEMAS_CRISTALINOS = ["Selecione...", "Cúbico", "Tetragonal", "Ortorrômbico", "Romboédrico",
                          "Hexagonal", "Monoclínico", "Triclínico"]
@@ -574,9 +575,9 @@ def coletar_campos_material(extraido: dict, pr: dict, rs: dict) -> dict:
         )
         equiv_k = para_kelvin(temperatura_c)
         if equiv_k is not None:
-            st.caption(f"{equiv_k:.1f} K — T do DRX/refinamento, não do forno.")
+            st.caption(f"{equiv_k:.1f} K — temperatura da medida, não do forno.")
         else:
-            st.caption("Deixe vazio se o artigo não informar a T do difratograma.")
+            st.caption("Deixe vazio se o artigo não informar a temperatura da medida.")
         metodo_sintese = st.text_input(
             "Método de síntese",
             value=rs.get("metodo") or "",
@@ -599,11 +600,11 @@ def coletar_campos_material(extraido: dict, pr: dict, rs: dict) -> dict:
     with f1:
         temp_calcinacao = campo_num("T calcinação (°C)", rs.get("temp_calcinacao"), "%.1f")
     with f2:
-        tempo_calcinacao = campo_num("t calcinação (h)", rs.get("tempo_calcinacao"), "%.2f")
+        tempo_calcinacao = campo_num("t calcinação (min)", rs.get("tempo_calcinacao"), "%.1f")
     with f3:
         temp_sinterizacao = campo_num("T sinterização (°C)", rs.get("temp_sinterizacao"), "%.1f")
     with f4:
-        tempo_sinterizacao = campo_num("t sinterização (h)", rs.get("tempo_sinterizacao"), "%.2f")
+        tempo_sinterizacao = campo_num("t sinterização (min)", rs.get("tempo_sinterizacao"), "%.1f")
     with f5:
         taxa_aquecimento = campo_num("Aquecimento (°C/min)", rs.get("taxa_aquecimento"), "%.2f")
     with f6:
@@ -701,19 +702,7 @@ def campos_de_extraido(item: dict) -> dict:
 
 
 def resumo_medidas(medidas: list[dict]) -> list[dict]:
-    return [
-        {
-            "Condição": m.get("condicao") or "—",
-            "T DRX (°C)": para_celsius(m.get("temperatura_k")),
-            "T DRX (K)": m.get("temperatura_k"),
-            "Sistema": m.get("sistema_cristalino"),
-            "Grupo": m.get("grupo_espacial"),
-            "a (Å)": m.get("a"),
-            "b (Å)": m.get("b"),
-            "c (Å)": m.get("c"),
-        }
-        for m in medidas
-    ]
+    return [linha_tabela_medida(m) for m in medidas]
 
 
 def rotulo_extraido(i: int, item: dict) -> str:
@@ -993,20 +982,7 @@ def secao_acervo(client):
         return
 
     st.dataframe(
-        [
-            {
-                "Condição": m.get("condicao") or "—",
-                "T DRX (°C)": para_celsius(m.get("temperatura_k")),
-                "T DRX (K)": m.get("temperatura_k"),
-                "Sistema": m.get("sistema_cristalino") or "—",
-                "Grupo": m.get("grupo_espacial_hm") or "—",
-                "a (Å)": m.get("a"),
-                "b (Å)": m.get("b"),
-                "c (Å)": m.get("c"),
-                "Técnica": m.get("tecnica_medicao") or "—",
-            }
-            for m in medidas
-        ],
+        [linha_tabela_medida(m) for m in medidas],
         hide_index=True,
         width="stretch",
     )

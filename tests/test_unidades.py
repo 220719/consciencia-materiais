@@ -1,0 +1,115 @@
+from apresentacao import linha_tabela_medida
+from simetria import aplicar_restricao, campos_fixos, sistema_de_grupo
+from unidades import (
+    para_celsius,
+    para_kelvin,
+    sanitizar_material,
+    sanitizar_medida,
+    sanitizar_rota,
+    temperatura_medida_para_k,
+    tempo_para_minutos,
+)
+
+
+def test_celsius_kelvin_ida_e_volta():
+    assert para_celsius(298.15) == 25.0
+    assert para_kelvin(25) == 298.15
+    assert para_celsius(None) is None
+
+
+def test_temperatura_c_do_artigo_vira_kelvin():
+    assert temperatura_medida_para_k({"temperatura_c": 200}) == 473.15
+
+
+def test_nakatani_em_kelvin_nao_converte_de_novo():
+    assert temperatura_medida_para_k({"temperatura_k": 298}) == 298
+
+
+def test_nao_inventar_25_quando_condicao_e_ambiente():
+    m = sanitizar_medida(
+        {"temperatura_c": 25, "condicao": "temperatura ambiente", "a": 5.578},
+        {"temp_sinterizacao": 890},
+    )
+    assert m["temperatura_k"] is None
+    assert m["condicao"] is None
+
+
+def test_890_do_forno_nao_vira_temperatura_da_medida():
+    m = sanitizar_medida(
+        {"temperatura_c": 890, "a": 5.578, "c": 13.867},
+        {"temp_sinterizacao": 890},
+    )
+    assert m["temperatura_k"] is None
+
+
+def test_serie_vs_t_em_kelvin_permanece():
+    m = sanitizar_medida(
+        {"temperatura_k": 413, "condicao": "413 K", "a": 4.01},
+        {"temp_sinterizacao": 890},
+    )
+    assert m["temperatura_k"] == 413
+
+
+def test_tempo_3_min_nao_vira_fracao_de_hora():
+    assert tempo_para_minutos(3) == 3
+    assert tempo_para_minutos(3, "min") == 3
+
+
+def test_tempo_em_horas_vira_minutos():
+    assert tempo_para_minutos(2, "h") == 120
+    assert tempo_para_minutos(0.05, "h") == 3
+    assert tempo_para_minutos(0.05) == 3
+
+
+def test_rota_co_bfo_3_min_e_890_c():
+    rota = sanitizar_rota({
+        "temp_sinterizacao": 890,
+        "tempo_sinterizacao": 3,
+        "tempo_sinterizacao_unidade": "min",
+    })
+    assert rota["temp_sinterizacao"] == 890
+    assert rota["tempo_sinterizacao"] == 3
+
+
+def test_legado_0_05_hora_vira_3_min():
+    rota = sanitizar_rota({"tempo_sinterizacao": 0.05})
+    assert rota["tempo_sinterizacao"] == 3
+
+
+def test_artigo_co_bfo_nao_inventa_t_medida():
+    item = sanitizar_material({
+        "formula": "BiFe0.99Co0.01O3",
+        "rota_sintese": {"temp_sinterizacao": 890, "tempo_sinterizacao": 3},
+        "medidas": [{
+            "a": 5.578, "c": 13.867, "grupo_espacial": "R3c",
+            "temperatura_c": 25, "condicao": "temperatura ambiente",
+        }],
+    })
+    assert item["rota_sintese"]["tempo_sinterizacao"] == 3
+    assert item["rota_sintese"]["temp_sinterizacao"] == 890
+    assert item["medidas"][0]["temperatura_k"] is None
+
+
+def test_tabela_nao_usa_rotulo_drx_na_temperatura():
+    linha = linha_tabela_medida({
+        "condicao": None,
+        "temperatura_k": None,
+        "sistema_cristalino": "Romboédrico",
+        "grupo_espacial_hm": "R3c",
+        "a": 5.578, "b": 5.578, "c": 13.866,
+        "tecnica_medicao": "DRX laboratório (Cu Kα)",
+    })
+    assert "T (°C)" in linha
+    assert "T (K)" in linha
+    assert all("DRX" not in chave for chave in linha)
+    assert linha["T (°C)"] is None
+    assert linha["Técnica"] == "DRX laboratório (Cu Kα)"
+
+
+def test_r3c_preenche_angulos_hexagonais_e_nao_copia_c():
+    cela = aplicar_restricao({"grupo_espacial": "R3c", "a": 5.578, "c": 13.867})
+    assert sistema_de_grupo("R3c", None) == "Romboédrico"
+    assert cela["alpha"] == 90 and cela["beta"] == 90 and cela["gamma"] == 120
+    assert cela["b"] == 5.578
+    assert cela["c"] == 13.867
+    assert "alpha" in campos_fixos("Romboédrico")

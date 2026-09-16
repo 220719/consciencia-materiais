@@ -149,6 +149,9 @@ create table if not exists public.rotas_sintese (
   criado_em timestamptz not null default now()
 );
 
+comment on column public.rotas_sintese.tempo_calcinacao is 'Tempo em minutos.';
+comment on column public.rotas_sintese.tempo_sinterizacao is 'Tempo em minutos.';
+
 create table if not exists public.medidas_estruturais (
   id uuid primary key default gen_random_uuid(),
   amostra_id uuid not null references public.amostras (id) on delete cascade,

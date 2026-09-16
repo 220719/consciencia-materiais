@@ -9,7 +9,7 @@ import os
 import requests
 from anthropic import Anthropic
 from pypdf import PdfReader
-from unidades import temperatura_medida_para_k
+from unidades import sanitizar_material, temperatura_medida_para_k
 
 CLAUDE_MODEL = "claude-sonnet-5"
 
@@ -150,14 +150,14 @@ Outras regras:
 - A técnica de medida normalmente vale para a série inteira: repita o mesmo valor de
   "tecnica_medicao" em todas as medidas. DRX de monocristal = "Monocristal".
 - Parâmetros de rede em Ångström (Å), ângulos em graus.
-- Temperatura de MEDIDA estrutural (DRX/Rietveld) NÃO é temperatura de forno.
-  Só preencha temperatura_c ou temperatura_k se o artigo disser a T do difratograma
-  ou da tabela de parâmetros de rede (ex.: série 298–778 K, HT-XRD a 200 °C).
-  Se o DRX for de laboratório e o texto NÃO der a T da medida, omita os dois campos
-  e omita "temperatura ambiente". NUNCA invente 25 °C nem 298 K.
-  890 °C / 3 min de fast firing, calcinação ou sinterização vai SOMENTE para
-  rota_sintese (temp_sinterizacao / temp_calcinacao), nunca para medidas.
-- Temperaturas de síntese sempre em Celsius; tempos em horas (3 min = 0,05 h).
+- Temperatura da MEDIDA estrutural NÃO é temperatura de forno.
+  Só preencha temperatura_c ou temperatura_k se o artigo disser a T da medida
+  (ex.: série 298–778 K, HT-XRD a 200 °C).
+  Se o texto NÃO der a T da medida, omita os dois campos e omita "temperatura ambiente".
+  NUNCA invente 25 °C nem 298 K.
+  890 °C / 3 min de fast firing vai SOMENTE para rota_sintese, nunca para medidas.
+- Temperaturas de síntese em Celsius. Tempos de forno em MINUTOS (3 min = 3, nunca 0,05).
+  Se o artigo der horas, converta (2 h = 120 min).
 
 Texto do artigo:
 {texto}
@@ -177,11 +177,11 @@ ESQUEMA_MEDIDA = {
         },
         "temperatura_c": {
             "type": "number",
-            "description": "T do DRX/refinamento em °C, só se o artigo informar esse número. Não use T de forno. Não invente 25.",
+            "description": "T da medida em °C, só se o artigo informar. Não use T de forno. Não invente 25.",
         },
         "temperatura_k": {
             "type": "number",
-            "description": "T do DRX/refinamento em kelvin, só se o artigo informar em K (tabela vs T). Não invente 298.",
+            "description": "T da medida em kelvin, só se o artigo informar em K. Não invente 298.",
         },
         "temperatura_unidade": {
             "type": "string",
@@ -223,9 +223,9 @@ ESQUEMA_MATERIAL = {
                 "metodo": {"type": "string"},
                 "precursores": {"type": "string"},
                 "temp_calcinacao": {"type": "number", "description": "°C"},
-                "tempo_calcinacao": {"type": "number", "description": "horas"},
+                "tempo_calcinacao": {"type": "number", "description": "minutos"},
                 "temp_sinterizacao": {"type": "number", "description": "°C"},
-                "tempo_sinterizacao": {"type": "number", "description": "horas"},
+                "tempo_sinterizacao": {"type": "number", "description": "minutos"},
                 "taxa_aquecimento": {"type": "number", "description": "°C/min"},
                 "taxa_resfriamento": {"type": "number", "description": "°C/min"},
                 "atmosfera": {"type": "string", "enum": ["Ar", "O2", "N2", "Vácuo"]},
@@ -266,7 +266,7 @@ def normalizar_materiais(payload: dict) -> list[dict]:
             k = temperatura_medida_para_k(m)
             if k is not None:
                 m["temperatura_k"] = k
-        normalizados.append({**item, "medidas": medidas})
+        normalizados.append(sanitizar_material({**item, "medidas": medidas}))
     return normalizados
 
 

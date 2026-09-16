@@ -5,7 +5,7 @@ import hashlib
 
 from extracao import buscar_metadados_crossref, normalizar_doi
 from simetria import aplicar_restricao, normalizar_hm
-from unidades import temperatura_medida_para_k
+from unidades import sanitizar_rota, temperatura_medida_para_k
 
 
 def _n(valor):
@@ -202,17 +202,24 @@ def salvar_amostra(client, pesquisador_id: str, campos: dict, medidas: list[dict
             ) from e
         raise
 
-    rs = {
+    rs = sanitizar_rota({
         "metodo": campos.get("metodo"),
         "precursores": campos.get("precursores"),
-        "temp_calcinacao": _n(campos.get("temp_calcinacao")),
-        "tempo_calcinacao": _n(campos.get("tempo_calcinacao")),
-        "temp_sinterizacao": _n(campos.get("temp_sinterizacao")),
-        "tempo_sinterizacao": _n(campos.get("tempo_sinterizacao")),
-        "taxa_aquecimento": _n(campos.get("taxa_aquecimento")),
-        "taxa_resfriamento": _n(campos.get("taxa_resfriamento")),
+        "temp_calcinacao": campos.get("temp_calcinacao"),
+        "tempo_calcinacao": campos.get("tempo_calcinacao"),
+        "temp_sinterizacao": campos.get("temp_sinterizacao"),
+        "tempo_sinterizacao": campos.get("tempo_sinterizacao"),
+        "taxa_aquecimento": campos.get("taxa_aquecimento"),
+        "taxa_resfriamento": campos.get("taxa_resfriamento"),
         "atmosfera": campos.get("atmosfera"),
         "observacao": campos.get("observacao"),
+    })
+    rs = {
+        **rs,
+        "temp_calcinacao": _n(rs.get("temp_calcinacao")),
+        "temp_sinterizacao": _n(rs.get("temp_sinterizacao")),
+        "taxa_aquecimento": _n(rs.get("taxa_aquecimento")),
+        "taxa_resfriamento": _n(rs.get("taxa_resfriamento")),
     }
     if any(v not in (None, "") for v in rs.values()):
         client.table("rotas_sintese").insert({"amostra_id": amostra["id"], **rs}).execute()
