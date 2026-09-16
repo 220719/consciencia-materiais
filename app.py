@@ -24,7 +24,7 @@ from extracao import (
 from persistencia import garantir_fonte, salvar_amostra
 from simetria import aplicar_em_material, aplicar_restricao, campos_fixos, sistema_de_grupo
 from unidades import para_celsius, para_kelvin, par_celsius_kelvin, temperatura_medida_para_k
-from apresentacao import linha_tabela_medida
+from apresentacao import linha_tabela_medida, montar_ficha, texto_ficha
 
 SISTEMAS_CRISTALINOS = ["Selecione...", "Cúbico", "Tetragonal", "Ortorrômbico", "Romboédrico",
                          "Hexagonal", "Monoclínico", "Triclínico"]
@@ -866,12 +866,15 @@ def listar_materiais(client) -> list[dict]:
             client.table("amostras")
             .select(
                 "id, rotulo, criado_em, inserido_por, "
-                "composicoes(formula, nome_comum, dopante, percentual_dopagem), "
+                "composicoes(formula, nome_comum, dopante, percentual_dopagem, "
+                "site_substituicao, familia_estrutural, aplicacao_alvo), "
                 "pesquisadores(nome, email), "
                 "fontes(doi, titulo, arquivo_path, arquivo_nome_original), "
-                "rotas_sintese(temp_calcinacao, temp_sinterizacao, metodo), "
+                "rotas_sintese(metodo, precursores, temp_calcinacao, tempo_calcinacao, "
+                "temp_sinterizacao, tempo_sinterizacao, taxa_aquecimento, "
+                "taxa_resfriamento, atmosfera, observacao), "
                 "medidas_estruturais(condicao, temperatura_k, sistema_cristalino, "
-                "grupo_espacial_hm, a, b, c, tecnica_medicao)"
+                "grupo_espacial_hm, a, b, c, alpha, beta, gamma, tecnica_medicao)"
             )
             .order("criado_em", desc=True)
             .execute()
@@ -921,6 +924,11 @@ def listar_materiais(client) -> list[dict]:
             "id": m["id"],
             "formula": (comp or {}).get("formula") or m.get("rotulo"),
             "nome_comum": (comp or {}).get("nome_comum"),
+            "dopante": (comp or {}).get("dopante"),
+            "percentual_dopagem": (comp or {}).get("percentual_dopagem"),
+            "site_substituicao": (comp or {}).get("site_substituicao"),
+            "familia_estrutural": (comp or {}).get("familia_estrutural"),
+            "aplicacao_alvo": (comp or {}).get("aplicacao_alvo"),
             "sistema_cristalino": primeira.get("sistema_cristalino"),
             "grupo_espacial": primeira.get("grupo_espacial_hm"),
             "n_medidas": len(medidas),
@@ -929,12 +937,76 @@ def listar_materiais(client) -> list[dict]:
             "pdf": bool(fonte.get("arquivo_path")),
             "arquivo_path": fonte.get("arquivo_path"),
             "medidas": medidas,
+            "rota": rota,
             "temp_sinterizacao": rota.get("temp_sinterizacao"),
             "temp_calcinacao": rota.get("temp_calcinacao"),
+            "tempo_sinterizacao": rota.get("tempo_sinterizacao"),
             "criado_em": m.get("criado_em"),
             "pesquisador": pesq.get("nome") or pesq.get("email") or "—",
         })
     return linhas
+
+
+def _indices_selecionados(evento) -> list[int]:
+    sel = getattr(evento, "selection", None)
+    if sel is None:
+        return []
+    return list(getattr(sel, "rows", None) or [])
+
+
+def _chave_ficha(prefixo: str, parte: str, rotulo: str) -> str:
+    limpo = "".join(c if c.isalnum() else "_" for c in f"{prefixo}_{parte}_{rotulo}")
+    return limpo[:80]
+
+
+def campo_leitura(rotulo: str, valor, chave: str, area: bool = False):
+    texto = texto_ficha(valor)
+    if area:
+        st.text_area(rotulo, value=texto, height=70, disabled=True, key=chave)
+    else:
+        st.text_input(rotulo, value=texto, disabled=True, key=chave)
+
+
+def mostrar_ficha_acervo(amostra: dict, medida: dict | None, rota: dict | None):
+    ficha = montar_ficha(amostra, medida, rota)
+    prefixo = f"{amostra.get('id')}_{texto_ficha((medida or {}).get('condicao'))}"
+    ident, rede, exp = st.columns([1.15, 1, 1.1])
+    with ident:
+        st.markdown("**Identidade**")
+        for rotulo, valor in ficha["identidade"].items():
+            campo_leitura(rotulo, valor, _chave_ficha(prefixo, "id", rotulo))
+    with rede:
+        st.markdown("**Cela unitária**")
+        for rotulo, valor in ficha["cela"].items():
+            campo_leitura(rotulo, valor, _chave_ficha(prefixo, "cela", rotulo))
+        st.caption("Ângulos e eixos iguais vêm do sistema/grupo espacial.")
+    with exp:
+        st.markdown("**Medida e síntese**")
+        for rotulo, valor in ficha["medida"].items():
+            if rotulo == "T da medida (K)":
+                continue
+            campo_leitura(
+                rotulo,
+                valor,
+                _chave_ficha(prefixo, "med", rotulo),
+                area=rotulo == "Precursores",
+            )
+        t_k = ficha["medida"].get("T da medida (K)", "—")
+        if t_k != "—":
+            st.caption(f"{t_k} K — temperatura gravada na medida.")
+        else:
+            st.caption("Artigo não informou a temperatura da medida.")
+
+    st.markdown("**Forno**")
+    cols = st.columns(6)
+    for col, (rotulo, valor) in zip(cols, ficha["forno"].items()):
+        with col:
+            campo_leitura(rotulo, valor, _chave_ficha(prefixo, "forno", rotulo))
+    campo_leitura(
+        "Observação da síntese",
+        ficha["observacao"],
+        _chave_ficha(prefixo, "obs", "sintese"),
+    )
 
 
 def secao_acervo(client):
@@ -974,7 +1046,7 @@ def secao_acervo(client):
     if autor != "Todos":
         filtradas = [m for m in filtradas if m.get("pesquisador") == autor]
 
-    st.caption(f"{len(filtradas)} de {len(linhas)} material(is)")
+    st.caption(f"{len(filtradas)} de {len(linhas)} material(is) — clique numa linha para abrir a ficha")
     visivel = [
         {
             "Fórmula": m.get("formula"),
@@ -989,46 +1061,71 @@ def secao_acervo(client):
         }
         for m in filtradas
     ]
-    st.dataframe(visivel, hide_index=True, width="stretch")
-
+    evento = st.dataframe(
+        visivel,
+        hide_index=True,
+        width="stretch",
+        on_select="rerun",
+        selection_mode="single-row",
+        key="acervo_tabela",
+    )
     if not filtradas:
         return
 
-    rotulos = [
-        f"{m.get('formula')} — {m.get('n_medidas') or 0} medida(s) — {m.get('artigo')}"
-        for m in filtradas
-    ]
-    escolha = st.selectbox("Ver medidas de", rotulos, key="acervo_detalhe")
-    atual = filtradas[rotulos.index(escolha)]
-    medidas = atual.get("medidas") or []
+    idxs = _indices_selecionados(evento)
+    if not idxs or idxs[0] < 0 or idxs[0] >= len(filtradas):
+        st.caption("Clique numa linha para ver identidade, cela, medida e síntese.")
+        return
 
-    partes = [atual.get("formula"), atual.get("nome_comum") or "sem nome comum"]
-    if atual.get("temp_sinterizacao") is not None:
-        partes.append(f"sinterização {atual['temp_sinterizacao']:g} °C")
-    elif atual.get("temp_calcinacao") is not None:
-        partes.append(f"calcinação {atual['temp_calcinacao']:g} °C")
-    partes.append("PDF no Storage" if atual.get("pdf") else "sem PDF")
+    atual = filtradas[idxs[0]]
+    medidas = atual.get("medidas") or []
+    rota = atual.get("rota") or {
+        "temp_sinterizacao": atual.get("temp_sinterizacao"),
+        "temp_calcinacao": atual.get("temp_calcinacao"),
+        "tempo_sinterizacao": atual.get("tempo_sinterizacao"),
+    }
+
     col_info, col_pdf = st.columns([3, 1])
     with col_info:
-        st.caption(" · ".join(str(p) for p in partes))
+        st.markdown(f"**{atual.get('formula') or 'Amostra'}**")
+        st.caption(
+            " · ".join(
+                str(p)
+                for p in [
+                    atual.get("nome_comum") or "sem nome comum",
+                    atual.get("artigo") or "sem artigo",
+                    f"{len(medidas)} medida(s)",
+                ]
+                if p
+            )
+        )
     with col_pdf:
         url = url_assinada_pdf(client, atual.get("arquivo_path")) if atual.get("pdf") else None
         if url:
             st.link_button("Abrir PDF", url)
 
+    medida = None
     if not medidas:
         st.info("Esta amostra não tem parâmetros de rede gravados (só fórmula/citação).")
-        return
+    elif len(medidas) == 1:
+        medida = medidas[0]
+    else:
+        st.caption("Clique na medida para ver a cela correspondente.")
+        ev_med = st.dataframe(
+            [linha_tabela_medida(m, rota) for m in medidas],
+            hide_index=True,
+            width="stretch",
+            on_select="rerun",
+            selection_mode="single-row",
+            key=f"acervo_medidas_{atual['id']}",
+        )
+        midx = _indices_selecionados(ev_med)
+        if midx and 0 <= midx[0] < len(medidas):
+            medida = medidas[midx[0]]
+        else:
+            medida = medidas[0]
 
-    rota = {
-        "temp_sinterizacao": atual.get("temp_sinterizacao"),
-        "temp_calcinacao": atual.get("temp_calcinacao"),
-    }
-    st.dataframe(
-        [linha_tabela_medida(m, rota) for m in medidas],
-        hide_index=True,
-        width="stretch",
-    )
+    mostrar_ficha_acervo(atual, medida, rota)
 
 
 def formulario_material(pesquisador):

@@ -133,6 +133,46 @@ def test_tabela_mostra_par_celsius_kelvin_nunca_none():
     assert linha["Técnica"] == "DRX laboratório (Cu Kα)"
 
 
+def test_ficha_acervo_mostra_angulos_e_tempo_forno():
+    from apresentacao import montar_ficha
+
+    ficha = montar_ficha(
+        {
+            "formula": "BiFe0.98Co0.02O3",
+            "nome_comum": "BiFeO3 2.0 at% Co",
+            "dopante": "Co",
+            "percentual_dopagem": 2.0,
+            "familia_estrutural": "Perovskita",
+        },
+        {
+            "condicao": "2.0 at% Co",
+            "temperatura_k": 1163.15,
+            "sistema_cristalino": "Romboédrico",
+            "grupo_espacial_hm": "R3c",
+            "a": 5.578,
+            "b": 5.578,
+            "c": 13.866,
+            "alpha": 90,
+            "beta": 90,
+            "gamma": 120,
+            "tecnica_medicao": "DRX laboratório (Cu Kα)",
+        },
+        {
+            "metodo": "estado sólido + fast firing",
+            "temp_sinterizacao": 890,
+            "tempo_sinterizacao": 3,
+            "atmosfera": "Ar",
+        },
+    )
+    assert ficha["cela"]["α (°)"] == "90"
+    assert ficha["cela"]["γ (°)"] == "120"
+    assert ficha["cela"]["a (Å)"] == "5.578"
+    assert ficha["forno"]["T sinterização (°C)"] == "890"
+    assert ficha["forno"]["t sinterização (min)"] == "3"
+    assert ficha["medida"]["Técnica"] == "DRX laboratório (Cu Kα)"
+    assert "None" not in str(ficha)
+
+
 def test_r3c_preenche_angulos_hexagonais_e_nao_copia_c():
     cela = aplicar_restricao({"grupo_espacial": "R3c", "a": 5.578, "c": 13.867})
     assert sistema_de_grupo("R3c", None) == "Romboédrico"

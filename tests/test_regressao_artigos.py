@@ -124,6 +124,8 @@ def test_rotulos_app_e_prompt():
     extracao = (RAIZ / "extracao.py").read_text(encoding="utf-8")
     assert "T DRX" not in app
     assert "t sinterização (min)" in app
+    assert "on_select" in app
+    assert "montar_ficha" in app
     assert "t calcinação (min)" in app
     assert "t sinterização (h)" not in app
     assert "0,05 h" not in extracao
