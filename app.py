@@ -701,8 +701,8 @@ def campos_de_extraido(item: dict) -> dict:
     }
 
 
-def resumo_medidas(medidas: list[dict]) -> list[dict]:
-    return [linha_tabela_medida(m) for m in medidas]
+def resumo_medidas(medidas: list[dict], rota: dict | None = None) -> list[dict]:
+    return [linha_tabela_medida(m, rota) for m in medidas]
 
 
 def rotulo_extraido(i: int, item: dict) -> str:
@@ -743,7 +743,7 @@ def secao_extraidos() -> tuple[int, dict]:
             f"Este material tem {len(medidas)} medidas. O formulário mostra a primeira; "
             "ao salvar, todas são gravadas."
         )
-        st.dataframe(resumo_medidas(medidas), hide_index=True, width="stretch")
+        st.dataframe(resumo_medidas(medidas, atual.get("rota_sintese")), hide_index=True, width="stretch")
 
     return indice, atual
 
@@ -981,8 +981,12 @@ def secao_acervo(client):
         st.info("Esta amostra não tem parâmetros de rede gravados (só fórmula/citação).")
         return
 
+    rota = {
+        "temp_sinterizacao": atual.get("temp_sinterizacao"),
+        "temp_calcinacao": atual.get("temp_calcinacao"),
+    }
     st.dataframe(
-        [linha_tabela_medida(m) for m in medidas],
+        [linha_tabela_medida(m, rota) for m in medidas],
         hide_index=True,
         width="stretch",
     )

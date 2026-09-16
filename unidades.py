@@ -60,6 +60,19 @@ def temperatura_medida_para_k(medida: dict | None) -> float | None:
     return k
 
 
+def par_celsius_kelvin(medida: dict | None = None, rota: dict | None = None) -> tuple[float | None, float | None]:
+    """Se o artigo der °C ou K, devolve os dois. Sem número, (None, None)."""
+    k = temperatura_medida_para_k(medida)
+    if k is None:
+        rota = rota or {}
+        t_forno = _n(rota.get("temp_sinterizacao")) or _n(rota.get("temp_calcinacao"))
+        if t_forno is not None:
+            k = para_kelvin(t_forno)
+    if k is None:
+        return None, None
+    return para_celsius(k), k
+
+
 def tempo_para_minutos(valor, unidade: str | None = None) -> float | None:
     """Tempo de forno em minutos. 3 min → 3; 2 h → 120; legado 0,05 h → 3."""
     n = _n(valor)
@@ -89,30 +102,21 @@ def sanitizar_rota(rota: dict | None) -> dict:
 
 
 def sanitizar_medida(medida: dict | None, rota: dict | None = None) -> dict:
-    """T de forno não vira T de medida; 25 °C inventado como 'ambiente' some."""
+    """Garante um par °C/K. Descarta só 25 °C inventado como 'ambiente'."""
     m = dict(medida or {})
     rota = rota or {}
     k = temperatura_medida_para_k(m)
     c = para_celsius(k)
     condicao = str(m.get("condicao") or "").strip().lower()
-    forno = []
-    for chave in ("temp_sinterizacao", "temp_calcinacao"):
-        t = _n(rota.get(chave))
-        if t is not None:
-            forno.append(t)
-
-    if c is not None and any(abs(c - t) < 0.6 for t in forno):
+    if c is not None and condicao in CONDICOES_AMBIENTE and abs(c - 25) < 0.2:
         k = None
-    elif c is not None and condicao in CONDICOES_AMBIENTE and abs(c - 25) < 0.2:
-        k = None
-        if condicao in CONDICOES_AMBIENTE:
-            m["condicao"] = None
-
-    if k is None:
-        m["temperatura_k"] = None
-        m.pop("temperatura_c", None)
+        m["condicao"] = None
+    c, k = par_celsius_kelvin({**m, "temperatura_k": k, "temperatura_c": None}, rota)
+    m["temperatura_k"] = k
+    if c is not None:
+        m["temperatura_c"] = c
     else:
-        m["temperatura_k"] = k
+        m.pop("temperatura_c", None)
     return m
 
 

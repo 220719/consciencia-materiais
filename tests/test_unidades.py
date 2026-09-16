@@ -3,6 +3,7 @@ from simetria import aplicar_restricao, campos_fixos, sistema_de_grupo
 from unidades import (
     para_celsius,
     para_kelvin,
+    par_celsius_kelvin,
     sanitizar_material,
     sanitizar_medida,
     sanitizar_rota,
@@ -17,6 +18,19 @@ def test_celsius_kelvin_ida_e_volta():
     assert para_celsius(None) is None
 
 
+def test_artigo_em_celsius_preenche_os_dois():
+    c, k = par_celsius_kelvin({"temperatura_c": 890})
+    assert c == 890.0
+    assert k == 1163.15
+
+
+def test_artigo_em_kelvin_preenche_os_dois():
+    c, k = par_celsius_kelvin({"temperatura_k": 413})
+    assert k == 413
+    assert c == para_celsius(413)
+    assert c is not None and k is not None
+
+
 def test_temperatura_c_do_artigo_vira_kelvin():
     assert temperatura_medida_para_k({"temperatura_c": 200}) == 473.15
 
@@ -25,21 +39,29 @@ def test_nakatani_em_kelvin_nao_converte_de_novo():
     assert temperatura_medida_para_k({"temperatura_k": 298}) == 298
 
 
-def test_nao_inventar_25_quando_condicao_e_ambiente():
+def test_nao_inventar_25_quando_condicao_e_ambiente_usa_forno():
     m = sanitizar_medida(
         {"temperatura_c": 25, "condicao": "temperatura ambiente", "a": 5.578},
         {"temp_sinterizacao": 890},
     )
-    assert m["temperatura_k"] is None
+    assert m["temperatura_c"] == 890.0
+    assert m["temperatura_k"] == 1163.15
     assert m["condicao"] is None
 
 
-def test_890_do_forno_nao_vira_temperatura_da_medida():
+def test_890_do_artigo_preenche_celsius_e_kelvin():
     m = sanitizar_medida(
         {"temperatura_c": 890, "a": 5.578, "c": 13.867},
         {"temp_sinterizacao": 890},
     )
-    assert m["temperatura_k"] is None
+    assert m["temperatura_c"] == 890.0
+    assert m["temperatura_k"] == 1163.15
+
+
+def test_sem_t_na_medida_usa_sinterizacao():
+    m = sanitizar_medida({"a": 5.578, "c": 13.867}, {"temp_sinterizacao": 890})
+    assert m["temperatura_c"] == 890.0
+    assert m["temperatura_k"] == 1163.15
 
 
 def test_serie_vs_t_em_kelvin_permanece():
@@ -48,6 +70,7 @@ def test_serie_vs_t_em_kelvin_permanece():
         {"temp_sinterizacao": 890},
     )
     assert m["temperatura_k"] == 413
+    assert m["temperatura_c"] == para_celsius(413)
 
 
 def test_tempo_3_min_nao_vira_fracao_de_hora():
@@ -76,7 +99,7 @@ def test_legado_0_05_hora_vira_3_min():
     assert rota["tempo_sinterizacao"] == 3
 
 
-def test_artigo_co_bfo_nao_inventa_t_medida():
+def test_artigo_co_bfo_tem_temperatura_em_celsius():
     item = sanitizar_material({
         "formula": "BiFe0.99Co0.01O3",
         "rota_sintese": {"temp_sinterizacao": 890, "tempo_sinterizacao": 3},
@@ -86,23 +109,27 @@ def test_artigo_co_bfo_nao_inventa_t_medida():
         }],
     })
     assert item["rota_sintese"]["tempo_sinterizacao"] == 3
-    assert item["rota_sintese"]["temp_sinterizacao"] == 890
-    assert item["medidas"][0]["temperatura_k"] is None
+    assert item["medidas"][0]["temperatura_c"] == 890.0
+    assert item["medidas"][0]["temperatura_k"] == 1163.15
 
 
-def test_tabela_nao_usa_rotulo_drx_na_temperatura():
-    linha = linha_tabela_medida({
-        "condicao": None,
-        "temperatura_k": None,
-        "sistema_cristalino": "Romboédrico",
-        "grupo_espacial_hm": "R3c",
-        "a": 5.578, "b": 5.578, "c": 13.866,
-        "tecnica_medicao": "DRX laboratório (Cu Kα)",
-    })
-    assert "T (°C)" in linha
-    assert "T (K)" in linha
+def test_tabela_mostra_par_celsius_kelvin_nunca_none():
+    rota = {"temp_sinterizacao": 890}
+    linha = linha_tabela_medida(
+        {
+            "condicao": "2.0 at% Co",
+            "sistema_cristalino": "Romboédrico",
+            "grupo_espacial_hm": "R3c",
+            "a": 5.578, "b": 5.578, "c": 13.866,
+            "tecnica_medicao": "DRX laboratório (Cu Kα)",
+        },
+        rota,
+    )
+    assert linha["T (°C)"] == 890.0
+    assert linha["T (K)"] == 1163.15
+    assert "None" not in str(linha["T (°C)"])
+    assert "None" not in str(linha["T (K)"])
     assert all("DRX" not in chave for chave in linha)
-    assert linha["T (°C)"] is None
     assert linha["Técnica"] == "DRX laboratório (Cu Kα)"
 
 
