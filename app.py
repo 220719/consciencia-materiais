@@ -127,12 +127,17 @@ def _numero_ou_none(valor) -> float | None:
         return None
 
 
+def renovar_formulario():
+    st.session_state["form_nonce"] = st.session_state.get("form_nonce", 0) + 1
+
+
 def registrar_extracao(materiais: list[dict]):
     materiais = [aplicar_em_material(m) for m in (materiais or []) if isinstance(m, dict)]
     if not materiais:
         st.warning("O artigo foi lido, mas nenhum material foi identificado no texto.")
         return
     st.session_state["extraidos"] = materiais
+    renovar_formulario()
     medidas = sum(len(m.get("medidas") or []) for m in materiais)
     st.success(
         f"{len(materiais)} material(is) e {medidas} medida(s) encontrados. "
@@ -478,6 +483,7 @@ def campo_num(
     minimo: float | None = 0.0,
     maximo: float | None = None,
     disabled: bool = False,
+    key: str | None = None,
 ):
     """Number input vazio quando a extração não trouxe valor — não mascara ausência com 0,00."""
     n = _numero_ou_none(valor)
@@ -486,12 +492,15 @@ def campo_num(
         kwargs["min_value"] = minimo
     if maximo is not None:
         kwargs["max_value"] = maximo
+    if key:
+        kwargs["key"] = key
     return st.number_input(**kwargs)
 
 
-def coletar_campos_material(extraido: dict, pr: dict, rs: dict) -> dict:
-    # Sem `key=` nos widgets: com key, o Streamlit guarda o valor antigo na sessão
-    # e ignora o `value=` vindo da extração automática.
+def coletar_campos_material(extraido: dict, pr: dict, rs: dict, chave_form: str = "m") -> dict:
+    def k(nome: str) -> str:
+        return f"{chave_form}_{nome}"
+
     sistema_inicial = sistema_de_grupo(
         extraido.get("grupo_espacial") or pr.get("grupo_espacial"),
         extraido.get("sistema_cristalino") or pr.get("sistema_cristalino"),
@@ -500,20 +509,32 @@ def coletar_campos_material(extraido: dict, pr: dict, rs: dict) -> dict:
     ident, rede, exp = st.columns([1.15, 1, 1.1])
     with ident:
         st.markdown("**Identidade**")
-        formula = st.text_input("Fórmula química *", value=extraido.get("formula") or "", placeholder="Bi0.9Nd0.1FeO3")
-        nome_comum = st.text_input("Nome comum", value=extraido.get("nome_comum") or "", placeholder="BFO, BTO")
+        formula = st.text_input(
+            "Fórmula química *",
+            value=extraido.get("formula") or "",
+            placeholder="Bi0.9Nd0.1FeO3",
+            key=k("formula"),
+        )
+        nome_comum = st.text_input(
+            "Nome comum",
+            value=extraido.get("nome_comum") or "",
+            placeholder="BFO, BTO",
+            key=k("nome"),
+        )
         c1, c2 = st.columns(2)
         with c1:
             sistema_cristalino = st.selectbox(
                 "Sistema cristalino",
                 SISTEMAS_CRISTALINOS,
                 index=idx_selectbox(SISTEMAS_CRISTALINOS, sistema_inicial),
+                key=k("sistema"),
             )
         with c2:
             grupo_espacial = st.text_input(
                 "Grupo espacial",
                 value=extraido.get("grupo_espacial") or pr.get("grupo_espacial") or "",
                 placeholder="R3c, P4mm",
+                key=k("grupo"),
             )
         sistema_cristalino = sistema_de_grupo(grupo_espacial, sistema_cristalino) or sistema_cristalino
         cela = aplicar_restricao({
@@ -529,33 +550,43 @@ def coletar_campos_material(extraido: dict, pr: dict, rs: dict) -> dict:
         fixos = campos_fixos(cela.get("sistema_cristalino") or sistema_cristalino)
         d1, d2 = st.columns(2)
         with d1:
-            dopante = st.text_input("Dopante", value=extraido.get("dopante") or "", placeholder="Sm, Co, Nd")
+            dopante = st.text_input(
+                "Dopante",
+                value=extraido.get("dopante") or "",
+                placeholder="Sm, Co, Nd",
+                key=k("dopante"),
+            )
         with d2:
-            percentual_dopagem = campo_num("Dopagem (%)", extraido.get("percentual_dopagem"), "%.2f", 0.0, 100.0)
+            percentual_dopagem = campo_num(
+                "Dopagem (%)", extraido.get("percentual_dopagem"), "%.2f", 0.0, 100.0, key=k("dopagem"),
+            )
         site_substituicao = st.selectbox(
             "Sítio de substituição",
             SITES_SUBSTITUICAO,
             index=idx_selectbox(SITES_SUBSTITUICAO, extraido.get("site_substituicao")),
+            key=k("site"),
         )
         familia_estrutural = st.text_input(
             "Família estrutural",
             value=extraido.get("familia_estrutural") or "",
             placeholder="Perovskita",
+            key=k("familia"),
         )
         aplicacao_alvo = st.text_input(
             "Aplicação-alvo",
             value=extraido.get("aplicacao_alvo") or "",
             placeholder="Multiferróico",
+            key=k("aplicacao"),
         )
 
     with rede:
         st.markdown("**Cela unitária**")
-        a = campo_num("a (Å)", cela.get("a"), "%.4f")
-        b = campo_num("b (Å)", cela.get("b"), "%.4f", disabled="b" in fixos)
-        c = campo_num("c (Å)", cela.get("c"), "%.4f", disabled="c" in fixos)
-        alpha = campo_num("α (°)", cela.get("alpha"), "%.2f", 0.0, 180.0, disabled="alpha" in fixos)
-        beta = campo_num("β (°)", cela.get("beta"), "%.2f", 0.0, 180.0, disabled="beta" in fixos)
-        gamma = campo_num("γ (°)", cela.get("gamma"), "%.2f", 0.0, 180.0, disabled="gamma" in fixos)
+        a = campo_num("a (Å)", cela.get("a"), "%.4f", key=k("a"))
+        b = campo_num("b (Å)", cela.get("b"), "%.4f", disabled="b" in fixos, key=k("b"))
+        c = campo_num("c (Å)", cela.get("c"), "%.4f", disabled="c" in fixos, key=k("c"))
+        alpha = campo_num("α (°)", cela.get("alpha"), "%.2f", 0.0, 180.0, disabled="alpha" in fixos, key=k("alpha"))
+        beta = campo_num("β (°)", cela.get("beta"), "%.2f", 0.0, 180.0, disabled="beta" in fixos, key=k("beta"))
+        gamma = campo_num("γ (°)", cela.get("gamma"), "%.2f", 0.0, 180.0, disabled="gamma" in fixos, key=k("gamma"))
         if fixos:
             st.caption("Ângulos e eixos iguais preenchidos pelo sistema/grupo espacial.")
 
@@ -565,6 +596,7 @@ def coletar_campos_material(extraido: dict, pr: dict, rs: dict) -> dict:
             "Técnica",
             TECNICAS_MEDICAO,
             index=idx_selectbox(TECNICAS_MEDICAO, pr.get("tecnica_medicao")),
+            key=k("tecnica"),
         )
         temperatura_c = campo_num(
             "T da medida (°C)",
@@ -572,6 +604,7 @@ def coletar_campos_material(extraido: dict, pr: dict, rs: dict) -> dict:
             "%.1f",
             -273.15,
             3000.0,
+            key=k("temp_c"),
         )
         equiv_k = para_kelvin(temperatura_c)
         if equiv_k is not None:
@@ -582,37 +615,41 @@ def coletar_campos_material(extraido: dict, pr: dict, rs: dict) -> dict:
             "Método de síntese",
             value=rs.get("metodo") or "",
             placeholder="Sol-gel, Czochralski, estado sólido",
+            key=k("metodo"),
         )
         precursores = st.text_area(
             "Precursores",
             value=rs.get("precursores") or "",
             placeholder="Bi2O3, Nd2O3, Fe2O3",
             height=70,
+            key=k("precursores"),
         )
         atmosfera = st.selectbox(
             "Atmosfera",
             ATMOSFERAS,
             index=idx_selectbox(ATMOSFERAS, rs.get("atmosfera")),
+            key=k("atmosfera"),
         )
 
     st.markdown("**Forno**")
     f1, f2, f3, f4, f5, f6 = st.columns(6)
     with f1:
-        temp_calcinacao = campo_num("T calcinação (°C)", rs.get("temp_calcinacao"), "%.1f")
+        temp_calcinacao = campo_num("T calcinação (°C)", rs.get("temp_calcinacao"), "%.1f", key=k("tcal"))
     with f2:
-        tempo_calcinacao = campo_num("t calcinação (min)", rs.get("tempo_calcinacao"), "%.1f")
+        tempo_calcinacao = campo_num("t calcinação (min)", rs.get("tempo_calcinacao"), "%.1f", key=k("tcal_t"))
     with f3:
-        temp_sinterizacao = campo_num("T sinterização (°C)", rs.get("temp_sinterizacao"), "%.1f")
+        temp_sinterizacao = campo_num("T sinterização (°C)", rs.get("temp_sinterizacao"), "%.1f", key=k("tsint"))
     with f4:
-        tempo_sinterizacao = campo_num("t sinterização (min)", rs.get("tempo_sinterizacao"), "%.1f")
+        tempo_sinterizacao = campo_num("t sinterização (min)", rs.get("tempo_sinterizacao"), "%.1f", key=k("tsint_t"))
     with f5:
-        taxa_aquecimento = campo_num("Aquecimento (°C/min)", rs.get("taxa_aquecimento"), "%.2f")
+        taxa_aquecimento = campo_num("Aquecimento (°C/min)", rs.get("taxa_aquecimento"), "%.2f", key=k("aq"))
     with f6:
-        taxa_resfriamento = campo_num("Resfriamento (°C/min)", rs.get("taxa_resfriamento"), "%.2f")
+        taxa_resfriamento = campo_num("Resfriamento (°C/min)", rs.get("taxa_resfriamento"), "%.2f", key=k("resf"))
     observacao = st.text_input(
         "Observação da síntese",
         value=rs.get("observacao") or "",
         placeholder="Fast firing, esfera 140 µm, cristal comercial 99.99%",
+        key=k("obs"),
     )
 
     return {
@@ -728,6 +765,7 @@ def secao_extraidos() -> tuple[int, dict]:
     with col_limpar:
         if st.button("Limpar"):
             del st.session_state["extraidos"]
+            renovar_formulario()
             st.rerun()
 
     indice = 0
@@ -783,7 +821,8 @@ def salvar_todos_extraidos(client, pesquisador):
         st.error(f"Não salvei — {erro}")
     if salvos:
         st.success(f"{salvos} material(is) salvo(s).")
-        del st.session_state["extraidos"]
+        st.session_state.pop("extraidos", None)
+        renovar_formulario()
         st.rerun()
 
 
@@ -1007,15 +1046,14 @@ def formulario_material(pesquisador):
 
     st.divider()
     st.subheader("Cadastrar amostra")
-
     secao_extracao_automatica(pesquisador)
 
+    extraidos = st.session_state.get("extraidos") or []
     indice, extraido = secao_extraidos()
     medidas = extraido.get("medidas") or []
     pr = medidas[0] if medidas else {}
     rs = extraido.get("rota_sintese") or {}
     if extraido:
-        # Sistema e grupo às vezes vêm só na medida; o formulário mostra o que existir.
         extraido = {
             **extraido,
             "sistema_cristalino": extraido.get("sistema_cristalino") or pr.get("sistema_cristalino"),
@@ -1027,32 +1065,50 @@ def formulario_material(pesquisador):
         st.warning("Sessão inválida. Entre novamente com o ORCID.")
         return
 
-    if len(st.session_state.get("extraidos") or []) > 1:
+    nonce = st.session_state.get("form_nonce", 0)
+    chave_form = f"n{nonce}_i{indice}"
+
+    if extraidos:
         salvar_todos_extraidos(client, pesquisador)
-
-    campos = coletar_campos_material(extraido, pr, rs)
-    enviado = st.button("Salvar material", type="primary")
-
-    if enviado:
-        erro = validar_campos_material(campos)
-        if erro:
-            st.error(erro)
-            return
-        try:
-            salvar_material(client, pesquisador["id"], campos, medidas)
-        except Exception as e:
-            st.error(f"Erro ao salvar no Supabase: {e}")
-            return
-
-        restantes = list(st.session_state.get("extraidos") or [])
-        if 0 <= indice < len(restantes):
-            restantes.pop(indice)
-        if restantes:
-            st.session_state["extraidos"] = restantes
-        else:
-            st.session_state.pop("extraidos", None)
-        st.success(f"Amostra '{campos['formula']}' salva com sucesso!")
-        st.rerun()
+        campos = coletar_campos_material(extraido, pr, rs, chave_form)
+        enviado = st.button("Salvar só este material")
+        if enviado:
+            erro = validar_campos_material(campos)
+            if erro:
+                st.error(erro)
+            else:
+                try:
+                    salvar_material(client, pesquisador["id"], campos, medidas)
+                except Exception as e:
+                    st.error(f"Erro ao salvar no Supabase: {e}")
+                else:
+                    restantes = list(st.session_state.get("extraidos") or [])
+                    if 0 <= indice < len(restantes):
+                        restantes.pop(indice)
+                    if restantes:
+                        st.session_state["extraidos"] = restantes
+                    else:
+                        st.session_state.pop("extraidos", None)
+                    renovar_formulario()
+                    st.success(f"Amostra '{campos['formula']}' salva com sucesso!")
+                    st.rerun()
+    else:
+        with st.expander("Cadastrar amostra manualmente"):
+            campos = coletar_campos_material(extraido, pr, rs, chave_form)
+            enviado = st.button("Salvar material")
+            if enviado:
+                erro = validar_campos_material(campos)
+                if erro:
+                    st.error(erro)
+                else:
+                    try:
+                        salvar_material(client, pesquisador["id"], campos, medidas)
+                    except Exception as e:
+                        st.error(f"Erro ao salvar no Supabase: {e}")
+                    else:
+                        renovar_formulario()
+                        st.success(f"Amostra '{campos['formula']}' salva com sucesso!")
+                        st.rerun()
 
     st.divider()
     secao_acervo(client)
