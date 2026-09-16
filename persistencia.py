@@ -47,6 +47,34 @@ def buscar_fonte_por_hash(client, digest: str) -> dict | None:
     return (resp.data or [None])[0]
 
 
+def completar_fonte_com_doi(client, fonte: dict, doi: str) -> dict:
+    """Preenche DOI/título numa fonte que entrou só com o PDF."""
+    if not doi or fonte.get("doi"):
+        return fonte
+    chave = normalizar_doi(doi)
+    meta = None
+    try:
+        meta = buscar_metadados_crossref(chave)
+    except Exception:
+        meta = None
+    payload = {"doi": chave}
+    if meta:
+        if meta.get("titulo") and not fonte.get("titulo"):
+            payload["titulo"] = meta["titulo"]
+        if meta.get("autores") and not fonte.get("autores"):
+            payload["autores"] = meta["autores"]
+        if meta.get("periodico") and not fonte.get("periodico"):
+            payload["periodico"] = meta["periodico"]
+        if meta.get("ano") and not fonte.get("ano"):
+            payload["ano"] = meta["ano"]
+    try:
+        client.table("fontes").update(payload).eq("id", fonte["id"]).execute()
+        fonte.update(payload)
+    except Exception:
+        pass
+    return fonte
+
+
 def garantir_fonte(
     client,
     pesquisador_id: str,
@@ -64,6 +92,8 @@ def garantir_fonte(
     if digest:
         existente = buscar_fonte_por_hash(client, digest)
         if existente:
+            if doi and not existente.get("doi"):
+                existente = completar_fonte_com_doi(client, existente, doi)
             return existente, True
 
     meta = buscar_metadados_crossref(doi) if doi else None

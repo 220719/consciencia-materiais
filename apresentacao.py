@@ -88,4 +88,9 @@ def montar_ficha(amostra: dict, medida: dict | None = None, rota: dict | None = 
             "Resfriamento (°C/min)": texto_ficha(rota.get("taxa_resfriamento")),
         },
         "observacao": texto_ficha(rota.get("observacao")),
+        "artigo": {
+            "DOI": texto_ficha(amostra.get("doi")),
+            "Título": texto_ficha(amostra.get("titulo")),
+            "Arquivo": texto_ficha(amostra.get("arquivo_nome")),
+        },
     }

@@ -126,6 +126,7 @@ def test_rotulos_app_e_prompt():
     assert "t sinterização (min)" in app
     assert "on_select" in app
     assert "montar_ficha" in app
+    assert "extrair_doi_do_texto" in app
     assert "t calcinação (min)" in app
     assert "t sinterização (h)" not in app
     assert "0,05 h" not in extracao

@@ -5,6 +5,7 @@ Fluxo: DOI -> CrossRef (metadados) -> Unpaywall (PDF open access) -> Claude (ext
 import io
 import json
 import os
+import re
 
 import requests
 from anthropic import Anthropic
@@ -25,12 +26,32 @@ def _secret(name: str, default: str = "") -> str:
         return default
 
 
+DOI_RE = re.compile(
+    r"(?:https?://(?:dx\.)?doi\.org/|doi:\s*)?(10\.\d{4,9}/[-._;()/:A-Z0-9]+)",
+    re.IGNORECASE,
+)
+
+
 def normalizar_doi(doi: str) -> str:
-    doi = doi.strip()
-    for prefixo in ("https://doi.org/", "http://doi.org/", "doi.org/"):
-        if doi.lower().startswith(prefixo):
-            return doi[len(prefixo):]
-    return doi
+    doi = (doi or "").strip()
+    doi = re.sub(r"^https?://(?:dx\.)?doi\.org/", "", doi, flags=re.I)
+    doi = re.sub(r"^doi:\s*", "", doi, flags=re.I)
+    return doi.strip().rstrip(" .").lower()
+
+
+def extrair_doi_do_texto(texto: str | None) -> str | None:
+    """DOI do cabeçalho (primeiras páginas), não das referências."""
+    if not texto:
+        return None
+    janela = texto[:8000]
+    for match in DOI_RE.finditer(janela):
+        bruto = match.group(1).rstrip(").,;")
+        while bruto.endswith("."):
+            bruto = bruto[:-1]
+        chave = normalizar_doi(bruto)
+        if chave.startswith("10."):
+            return chave.lower()
+    return None
 
 
 def buscar_metadados_crossref(doi: str) -> dict | None:

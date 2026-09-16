@@ -18,6 +18,7 @@ from extracao import (
     baixar_texto_pdf,
     texto_de_pdf_bytes,
     extrair_campos_com_claude,
+    extrair_doi_do_texto,
     obter_token_publico_orcid,
     listar_publicacoes_orcid,
 )
@@ -384,6 +385,8 @@ def anexar_e_extrair(pesquisador, *, doi=None, pdf_bytes=None, nome_arquivo=None
             texto = baixar_texto_pdf(url)
             if texto:
                 break
+    if not doi:
+        doi = extrair_doi_do_texto(texto)
     if texto is None:
         st.warning(
             "Não consegui ler o texto do artigo (editora bloqueou ou PDF escaneado). "
@@ -430,7 +433,7 @@ def secao_extracao_automatica(pesquisador):
 
         with tab_upload:
             arquivo = st.file_uploader("PDF do artigo", type="pdf", key="upload_input")
-            doi_upload = st.text_input("DOI (se souber)", key="doi_upload")
+            doi_upload = st.text_input("DOI (se souber; o PDF também é lido)", key="doi_upload")
             if arquivo and st.button("Extrair campos", key="btn_upload"):
                 with st.spinner("Armazenando o PDF e extraindo os dados..."):
                     try:
@@ -841,12 +844,12 @@ def _como_lista(valor) -> list:
 
 
 def rotulo_artigo(fonte: dict) -> str:
-    if fonte.get("doi"):
-        return fonte["doi"]
-    if fonte.get("arquivo_nome_original"):
-        return fonte["arquivo_nome_original"]
     if fonte.get("titulo"):
         return fonte["titulo"]
+    if fonte.get("arquivo_nome_original"):
+        return fonte["arquivo_nome_original"]
+    if fonte.get("doi"):
+        return fonte["doi"]
     return "—"
 
 
@@ -933,7 +936,9 @@ def listar_materiais(client) -> list[dict]:
             "grupo_espacial": primeira.get("grupo_espacial_hm"),
             "n_medidas": len(medidas),
             "doi": fonte.get("doi"),
+            "titulo": fonte.get("titulo"),
             "artigo": rotulo_artigo(fonte),
+            "arquivo_nome": fonte.get("arquivo_nome_original"),
             "pdf": bool(fonte.get("arquivo_path")),
             "arquivo_path": fonte.get("arquivo_path"),
             "medidas": medidas,
@@ -970,6 +975,16 @@ def campo_leitura(rotulo: str, valor, chave: str, area: bool = False):
 def mostrar_ficha_acervo(amostra: dict, medida: dict | None, rota: dict | None):
     ficha = montar_ficha(amostra, medida, rota)
     prefixo = f"{amostra.get('id')}_{texto_ficha((medida or {}).get('condicao'))}"
+    art = ficha.get("artigo") or {}
+    if any(v != "—" for v in art.values()):
+        st.markdown("**Artigo**")
+        a1, a2, a3 = st.columns(3)
+        with a1:
+            campo_leitura("DOI", art.get("DOI"), _chave_ficha(prefixo, "art", "doi"))
+        with a2:
+            campo_leitura("Título", art.get("Título"), _chave_ficha(prefixo, "art", "titulo"))
+        with a3:
+            campo_leitura("Arquivo", art.get("Arquivo"), _chave_ficha(prefixo, "art", "arquivo"))
     ident, rede, exp = st.columns([1.15, 1, 1.1])
     with ident:
         st.markdown("**Identidade**")
@@ -1040,6 +1055,7 @@ def secao_acervo(client):
             or q in (m.get("nome_comum") or "").lower()
             or q in (m.get("grupo_espacial") or "").lower()
             or q in (m.get("artigo") or "").lower()
+            or q in (m.get("doi") or "").lower()
         ]
     if sistema != "Todos":
         filtradas = [m for m in filtradas if m.get("sistema_cristalino") == sistema]
@@ -1054,6 +1070,7 @@ def secao_acervo(client):
             "Sistema": m.get("sistema_cristalino") or "—",
             "Grupo": m.get("grupo_espacial") or "—",
             "Medidas": m.get("n_medidas") or 0,
+            "DOI": m.get("doi") or "—",
             "Artigo": m.get("artigo") or "—",
             "PDF": "sim" if m.get("pdf") else "não",
             "Pesquisador": m.get("pesquisador"),
@@ -1085,7 +1102,7 @@ def secao_acervo(client):
         "tempo_sinterizacao": atual.get("tempo_sinterizacao"),
     }
 
-    col_info, col_pdf = st.columns([3, 1])
+    col_info, col_links = st.columns([3, 1])
     with col_info:
         st.markdown(f"**{atual.get('formula') or 'Amostra'}**")
         st.caption(
@@ -1093,13 +1110,16 @@ def secao_acervo(client):
                 str(p)
                 for p in [
                     atual.get("nome_comum") or "sem nome comum",
+                    atual.get("doi") or None,
                     atual.get("artigo") or "sem artigo",
                     f"{len(medidas)} medida(s)",
                 ]
                 if p
             )
         )
-    with col_pdf:
+    with col_links:
+        if atual.get("doi"):
+            st.link_button("Abrir DOI", f"https://doi.org/{atual['doi']}")
         url = url_assinada_pdf(client, atual.get("arquivo_path")) if atual.get("pdf") else None
         if url:
             st.link_button("Abrir PDF", url)
