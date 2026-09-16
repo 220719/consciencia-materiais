@@ -61,16 +61,72 @@ def temperatura_medida_para_k(medida: dict | None) -> float | None:
 
 
 def par_celsius_kelvin(medida: dict | None = None, rota: dict | None = None) -> tuple[float | None, float | None]:
-    """Se o artigo der °C ou K, devolve os dois. Sem número, (None, None)."""
+    """Par °C/K só da medida estrutural. T de forno não entra aqui."""
+    _ = rota
     k = temperatura_medida_para_k(medida)
-    if k is None:
-        rota = rota or {}
-        t_forno = _n(rota.get("temp_sinterizacao")) or _n(rota.get("temp_calcinacao"))
-        if t_forno is not None:
-            k = para_kelvin(t_forno)
     if k is None:
         return None, None
     return para_celsius(k), k
+
+
+def _parece_ambiente(condicao: str) -> bool:
+    texto = (condicao or "").strip().lower()
+    return any(p in texto for p in CONDICOES_AMBIENTE)
+
+
+def _t_forno_c(rota: dict | None) -> list[float]:
+    rota = rota or {}
+    valores = []
+    for chave in ("temp_sinterizacao", "temp_calcinacao"):
+        n = _n(rota.get(chave))
+        if n is not None:
+            valores.append(n)
+    return valores
+
+
+def _condicao_cita_t(condicao: str, celsius: float | None, kelvin: float | None) -> bool:
+    """'413 K' ou '890 °C' na condição conta como T da medida, não do forno."""
+    texto = (condicao or "").lower()
+    if not texto:
+        return False
+    candidatos = []
+    if celsius is not None:
+        candidatos.append(str(int(round(celsius))))
+    if kelvin is not None:
+        candidatos.append(str(int(round(kelvin))))
+    tem_unidade = any(u in texto for u in ("k", "c", "°"))
+    return tem_unidade and any(n in texto.replace(" ", "") or n in texto for n in candidatos)
+
+
+def sanitizar_medida(medida: dict | None, rota: dict | None = None) -> dict:
+    """T da cela só se o artigo der T da medida. Forno fica na rota."""
+    m = dict(medida or {})
+    rota = rota or {}
+    k = temperatura_medida_para_k(m)
+    c = para_celsius(k)
+    condicao = str(m.get("condicao") or "")
+    if c is not None and _parece_ambiente(condicao) and abs(c - 25) < 0.2:
+        k = None
+        c = None
+        if condicao.strip().lower() in CONDICOES_AMBIENTE:
+            m["condicao"] = None
+    if c is not None and not _condicao_cita_t(condicao, c, k):
+        for t_forno in _t_forno_c(rota):
+            if abs(c - t_forno) < 0.6:
+                k = None
+                c = None
+                break
+    if k is None:
+        m["temperatura_k"] = None
+        m.pop("temperatura_c", None)
+        return m
+    c, k = par_celsius_kelvin({"temperatura_k": k})
+    m["temperatura_k"] = k
+    if c is not None:
+        m["temperatura_c"] = c
+    else:
+        m.pop("temperatura_c", None)
+    return m
 
 
 def tempo_para_minutos(valor, unidade: str | None = None) -> float | None:
@@ -99,25 +155,6 @@ def sanitizar_rota(rota: dict | None) -> dict:
         r.get("tempo_sinterizacao"), r.get("tempo_sinterizacao_unidade")
     )
     return r
-
-
-def sanitizar_medida(medida: dict | None, rota: dict | None = None) -> dict:
-    """Garante um par °C/K. Descarta só 25 °C inventado como 'ambiente'."""
-    m = dict(medida or {})
-    rota = rota or {}
-    k = temperatura_medida_para_k(m)
-    c = para_celsius(k)
-    condicao = str(m.get("condicao") or "").strip().lower()
-    if c is not None and condicao in CONDICOES_AMBIENTE and abs(c - 25) < 0.2:
-        k = None
-        m["condicao"] = None
-    c, k = par_celsius_kelvin({**m, "temperatura_k": k, "temperatura_c": None}, rota)
-    m["temperatura_k"] = k
-    if c is not None:
-        m["temperatura_c"] = c
-    else:
-        m.pop("temperatura_c", None)
-    return m
 
 
 def sanitizar_material(item: dict) -> dict:

@@ -5,7 +5,7 @@ import hashlib
 
 from extracao import buscar_metadados_crossref, normalizar_doi
 from simetria import aplicar_restricao, normalizar_hm
-from unidades import sanitizar_rota, par_celsius_kelvin
+from unidades import sanitizar_rota, sanitizar_medida, temperatura_medida_para_k
 
 
 def _n(valor):
@@ -198,7 +198,7 @@ def linha_medida(amostra_id, fonte_id, pesquisador_id, medida: dict, grupo_id=No
         "amostra_id": amostra_id,
         "fonte_id": fonte_id,
         "condicao": m.get("condicao") or None,
-        "temperatura_k": par_celsius_kelvin(m, rota)[1],
+        "temperatura_k": sanitizar_medida(m, rota).get("temperatura_k"),
         "grupo_espacial_id": grupo_id,
         "grupo_espacial_hm": hm,
         "setting": setting,
@@ -263,11 +263,9 @@ def salvar_amostra(client, pesquisador_id: str, campos: dict, medidas: list[dict
             "grupo_espacial": campos.get("grupo_espacial"),
             "tecnica_medicao": campos.get("tecnica_medicao"),
             "condicao": (lista[0].get("condicao") if lista else None),
-            "temperatura_k": campos.get("temperatura_k") or par_celsius_kelvin(
-                lista[0] if lista else {},
-                {"temp_sinterizacao": campos.get("temp_sinterizacao"),
-                 "temp_calcinacao": campos.get("temp_calcinacao")},
-            )[1],
+            "temperatura_k": campos.get("temperatura_k") or temperatura_medida_para_k(
+                lista[0] if lista else {}
+            ),
         }
         linhas_src = [principal] + lista[1:]
     else:

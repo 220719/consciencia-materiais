@@ -177,6 +177,8 @@ Outras regras:
   Se o texto NÃO der a T da medida, omita os dois campos e omita "temperatura ambiente".
   NUNCA invente 25 °C nem 298 K.
   890 °C / 3 min de fast firing vai SOMENTE para rota_sintese, nunca para medidas.
+  800 °C / 1,5 h de calcinação também: T da medida fica vazia se o DRX for ambiente.
+  O programa rejeita T da cela igual à T de forno, salvo se a condição citar essa T (ex.: "890 °C").
 - Temperaturas de síntese em Celsius. Tempos de forno em MINUTOS (3 min = 3, nunca 0,05).
   Se o artigo der horas, converta (2 h = 120 min).
 

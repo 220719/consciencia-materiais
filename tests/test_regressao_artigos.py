@@ -58,36 +58,34 @@ NAKATANI = {
 }
 
 
-def test_co_bfo_apos_normalizar_tem_t_celsius_e_kelvin():
+def test_co_bfo_apos_normalizar_nao_copia_forno_para_cela():
     itens = normalizar_materiais(CO_BFO)
     m = itens[0]["medidas"][0]
-    assert_par_t(m["temperatura_c"], m["temperatura_k"])
-    assert m["temperatura_c"] == 890.0
+    assert m.get("temperatura_k") is None
+    assert itens[0]["rota_sintese"]["temp_sinterizacao"] == 890
     assert itens[0]["rota_sintese"]["tempo_sinterizacao"] == 3
     cela = aplicar_restricao(m)
     assert cela["alpha"] == 90 and cela["gamma"] == 120
     assert cela["c"] == 13.866
 
 
-def test_tabela_co_bfo_nunca_mostra_none():
+def test_tabela_co_bfo_t_da_medida_fica_traco():
     itens = normalizar_materiais(CO_BFO)
     linha = linha_tabela_medida(itens[0]["medidas"][0], itens[0]["rota_sintese"])
-    assert_par_t(linha["T (°C)"], linha["T (K)"])
-    assert linha["T (°C)"] == 890.0
-    for chave in ("T (°C)", "T (K)"):
-        assert linha[chave] not in (None, "None", "—")
-        assert str(linha[chave]) != "None"
+    assert linha["T (°C)"] == "—"
+    assert linha["T (K)"] == "—"
     for valor in linha.values():
         assert str(valor) != "None"
 
 
-def test_listagem_salva_sem_t_na_medida_usa_sinterizacao():
-    """Como o PostgREST devolve: T nula na medida, 890 na rota."""
+def test_listagem_salva_sem_t_na_medida_nao_usa_sinterizacao():
+    """T nula na medida permanece nula; 890 fica na rota/forno."""
     linha = linha_tabela_medida(
         {"condicao": "2.0 at% Co", "a": 5.578, "c": 13.866, "grupo_espacial_hm": "R3c"},
         {"temp_sinterizacao": 890},
     )
-    assert_par_t(linha["T (°C)"], linha["T (K)"])
+    assert linha["T (°C)"] == "—"
+    assert linha["T (K)"] == "—"
 
 
 def test_nakatani_kelvin_nao_e_substituido_pelo_forno():
@@ -101,22 +99,21 @@ def test_nakatani_kelvin_nao_e_substituido_pelo_forno():
     assert linha["T (K)"] == 298
 
 
-def test_persistencia_grava_kelvin_quando_artigo_so_tem_sinterizacao():
+def test_persistencia_nao_grava_forno_como_t_da_medida():
     linha = linha_medida(
         "amostra", "fonte", "pesq",
         {"a": 5.578, "c": 13.866, "grupo_espacial": "R3c"},
         rota={"temp_sinterizacao": 890},
     )
-    assert linha["temperatura_k"] == 1163.15
-    assert para_celsius(linha["temperatura_k"]) == 890.0
+    assert linha["temperatura_k"] is None
 
 
-def test_25_ambiente_nao_sobrevive_se_artigo_tem_890():
+def test_25_ambiente_nao_vira_t_de_forno():
     m = sanitizar_medida(
         {"temperatura_c": 25, "condicao": "room temperature", "a": 5.578},
         {"temp_sinterizacao": 890},
     )
-    assert m["temperatura_c"] == 890.0
+    assert m.get("temperatura_k") is None
 
 
 def test_rotulos_app_e_prompt():

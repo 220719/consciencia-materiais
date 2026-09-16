@@ -39,29 +39,28 @@ def test_nakatani_em_kelvin_nao_converte_de_novo():
     assert temperatura_medida_para_k({"temperatura_k": 298}) == 298
 
 
-def test_nao_inventar_25_quando_condicao_e_ambiente_usa_forno():
+def test_nao_inventar_25_quando_condicao_e_ambiente():
     m = sanitizar_medida(
         {"temperatura_c": 25, "condicao": "temperatura ambiente", "a": 5.578},
         {"temp_sinterizacao": 890},
     )
-    assert m["temperatura_c"] == 890.0
-    assert m["temperatura_k"] == 1163.15
-    assert m["condicao"] is None
+    assert m.get("temperatura_c") is None
+    assert m.get("temperatura_k") is None
 
 
 def test_890_do_artigo_preenche_celsius_e_kelvin():
     m = sanitizar_medida(
-        {"temperatura_c": 890, "a": 5.578, "c": 13.867},
+        {"temperatura_c": 890, "a": 5.578, "c": 13.867, "condicao": "890 °C"},
         {"temp_sinterizacao": 890},
     )
     assert m["temperatura_c"] == 890.0
     assert m["temperatura_k"] == 1163.15
 
 
-def test_sem_t_na_medida_usa_sinterizacao():
+def test_sem_t_na_medida_nao_usa_sinterizacao():
     m = sanitizar_medida({"a": 5.578, "c": 13.867}, {"temp_sinterizacao": 890})
-    assert m["temperatura_c"] == 890.0
-    assert m["temperatura_k"] == 1163.15
+    assert m.get("temperatura_c") is None
+    assert m.get("temperatura_k") is None
 
 
 def test_serie_vs_t_em_kelvin_permanece():
@@ -109,11 +108,24 @@ def test_artigo_co_bfo_tem_temperatura_em_celsius():
         }],
     })
     assert item["rota_sintese"]["tempo_sinterizacao"] == 3
-    assert item["medidas"][0]["temperatura_c"] == 890.0
-    assert item["medidas"][0]["temperatura_k"] == 1163.15
+    assert item["medidas"][0].get("temperatura_k") is None
+    assert item["rota_sintese"]["temp_sinterizacao"] == 890
 
 
-def test_tabela_mostra_par_celsius_kelvin_nunca_none():
+def test_karpinsky_nao_copia_calcinacao_para_cela():
+    m = sanitizar_medida(
+        {
+            "a": 3.932, "c": 3.980, "grupo_espacial": "R3c",
+            "condicao": "temperatura ambiente",
+            "temperatura_k": 1073.15,
+        },
+        {"temp_calcinacao": 800, "tempo_calcinacao": 90},
+    )
+    assert m.get("temperatura_k") is None
+    assert m.get("temperatura_c") is None
+
+
+def test_tabela_mostra_traco_se_nao_houver_t_da_medida():
     rota = {"temp_sinterizacao": 890}
     linha = linha_tabela_medida(
         {
@@ -125,8 +137,8 @@ def test_tabela_mostra_par_celsius_kelvin_nunca_none():
         },
         rota,
     )
-    assert linha["T (°C)"] == 890.0
-    assert linha["T (K)"] == 1163.15
+    assert linha["T (°C)"] == "—"
+    assert linha["T (K)"] == "—"
     assert "None" not in str(linha["T (°C)"])
     assert "None" not in str(linha["T (K)"])
     assert all("DRX" not in chave for chave in linha)
