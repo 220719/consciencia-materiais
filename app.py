@@ -770,6 +770,40 @@ def salvar_todos_extraidos(client, pesquisador):
         st.rerun()
 
 
+def _como_dict(valor) -> dict:
+    if isinstance(valor, list):
+        return valor[0] if valor else {}
+    return valor or {}
+
+
+def _como_lista(valor) -> list:
+    if valor is None:
+        return []
+    if isinstance(valor, dict):
+        return [valor]
+    return list(valor)
+
+
+def rotulo_artigo(fonte: dict) -> str:
+    if fonte.get("doi"):
+        return fonte["doi"]
+    if fonte.get("arquivo_nome_original"):
+        return fonte["arquivo_nome_original"]
+    if fonte.get("titulo"):
+        return fonte["titulo"]
+    return "—"
+
+
+def url_assinada_pdf(client, caminho: str | None) -> str | None:
+    if not caminho:
+        return None
+    try:
+        resp = client.storage.from_("artigos").create_signed_url(caminho, 3600)
+        return resp.get("signedURL") or resp.get("signedUrl")
+    except Exception:
+        return None
+
+
 def listar_materiais(client) -> list[dict]:
     try:
         resp = (
@@ -778,8 +812,9 @@ def listar_materiais(client) -> list[dict]:
                 "id, rotulo, criado_em, inserido_por, "
                 "composicoes(formula, nome_comum, dopante, percentual_dopagem), "
                 "pesquisadores(nome, email), "
-                "fontes(doi, titulo), "
-                "medidas_estruturais(sistema_cristalino, grupo_espacial_hm, a, b, c, temperatura_k)"
+                "fontes(doi, titulo, arquivo_path, arquivo_nome_original), "
+                "medidas_estruturais(condicao, temperatura_k, sistema_cristalino, "
+                "grupo_espacial_hm, a, b, c, tecnica_medicao)"
             )
             .order("criado_em", desc=True)
             .execute()
@@ -801,26 +836,26 @@ def listar_materiais(client) -> list[dict]:
                 "nome_comum": None,
                 "sistema_cristalino": None,
                 "grupo_espacial": None,
-                "n_medidas": None,
+                "n_medidas": 0,
                 "doi": None,
+                "artigo": "—",
+                "pdf": False,
+                "arquivo_path": None,
+                "medidas": [],
                 "criado_em": m.get("criado_em"),
                 "pesquisador": "—",
             })
         return linhas
     linhas = []
     for m in dados:
-        comp = m.get("composicoes") or {}
-        if isinstance(comp, list):
-            comp = comp[0] if comp else {}
-        pesq = m.get("pesquisadores") or {}
-        if isinstance(pesq, list):
-            pesq = pesq[0] if pesq else {}
-        fonte = m.get("fontes") or {}
-        if isinstance(fonte, list):
-            fonte = fonte[0] if fonte else {}
-        medidas = m.get("medidas_estruturais") or []
-        if isinstance(medidas, dict):
-            medidas = [medidas]
+        comp = _como_dict(m.get("composicoes"))
+        pesq = _como_dict(m.get("pesquisadores"))
+        fonte = _como_dict(m.get("fontes"))
+        medidas = _como_lista(m.get("medidas_estruturais"))
+        medidas = sorted(
+            medidas,
+            key=lambda x: (x.get("temperatura_k") is None, x.get("temperatura_k") or 0),
+        )
         primeira = medidas[0] if medidas else {}
         linhas.append({
             "id": m["id"],
@@ -829,9 +864,13 @@ def listar_materiais(client) -> list[dict]:
             "sistema_cristalino": primeira.get("sistema_cristalino"),
             "grupo_espacial": primeira.get("grupo_espacial_hm"),
             "n_medidas": len(medidas),
-            "doi": (fonte or {}).get("doi"),
+            "doi": fonte.get("doi"),
+            "artigo": rotulo_artigo(fonte),
+            "pdf": bool(fonte.get("arquivo_path")),
+            "arquivo_path": fonte.get("arquivo_path"),
+            "medidas": medidas,
             "criado_em": m.get("criado_em"),
-            "pesquisador": (pesq or {}).get("nome") or (pesq or {}).get("email") or "—",
+            "pesquisador": pesq.get("nome") or pesq.get("email") or "—",
         })
     return linhas
 
@@ -866,6 +905,7 @@ def secao_acervo(client):
             if q in (m.get("formula") or "").lower()
             or q in (m.get("nome_comum") or "").lower()
             or q in (m.get("grupo_espacial") or "").lower()
+            or q in (m.get("artigo") or "").lower()
         ]
     if sistema != "Todos":
         filtradas = [m for m in filtradas if m.get("sistema_cristalino") == sistema]
@@ -876,17 +916,62 @@ def secao_acervo(client):
     visivel = [
         {
             "Fórmula": m.get("formula"),
-            "Nome": m.get("nome_comum"),
-            "Sistema": m.get("sistema_cristalino"),
-            "Grupo": m.get("grupo_espacial"),
-            "Medidas": m.get("n_medidas"),
-            "DOI": m.get("doi"),
+            "Nome": m.get("nome_comum") or "—",
+            "Sistema": m.get("sistema_cristalino") or "—",
+            "Grupo": m.get("grupo_espacial") or "—",
+            "Medidas": m.get("n_medidas") or 0,
+            "Artigo": m.get("artigo") or "—",
+            "PDF": "sim" if m.get("pdf") else "não",
             "Pesquisador": m.get("pesquisador"),
             "Criado em": formatar_criado_em(m.get("criado_em")),
         }
         for m in filtradas
     ]
     st.dataframe(visivel, hide_index=True, width="stretch")
+
+    if not filtradas:
+        return
+
+    rotulos = [
+        f"{m.get('formula')} — {m.get('n_medidas') or 0} medida(s) — {m.get('artigo')}"
+        for m in filtradas
+    ]
+    escolha = st.selectbox("Ver medidas de", rotulos, key="acervo_detalhe")
+    atual = filtradas[rotulos.index(escolha)]
+    medidas = atual.get("medidas") or []
+
+    col_info, col_pdf = st.columns([3, 1])
+    with col_info:
+        st.caption(
+            f"{atual.get('formula')} · {atual.get('nome_comum') or 'sem nome comum'} · "
+            f"{'PDF no Storage' if atual.get('pdf') else 'sem PDF'}"
+        )
+    with col_pdf:
+        url = url_assinada_pdf(client, atual.get("arquivo_path")) if atual.get("pdf") else None
+        if url:
+            st.link_button("Abrir PDF", url)
+
+    if not medidas:
+        st.info("Esta amostra não tem parâmetros de rede gravados (só fórmula/citação).")
+        return
+
+    st.dataframe(
+        [
+            {
+                "Condição": m.get("condicao") or "—",
+                "T (K)": m.get("temperatura_k"),
+                "Sistema": m.get("sistema_cristalino") or "—",
+                "Grupo": m.get("grupo_espacial_hm") or "—",
+                "a (Å)": m.get("a"),
+                "b (Å)": m.get("b"),
+                "c (Å)": m.get("c"),
+                "Técnica": m.get("tecnica_medicao") or "—",
+            }
+            for m in medidas
+        ],
+        hide_index=True,
+        width="stretch",
+    )
 
 
 def formulario_material(pesquisador):
