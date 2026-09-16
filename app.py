@@ -22,7 +22,7 @@ from extracao import (
     listar_publicacoes_orcid,
 )
 from persistencia import garantir_fonte, salvar_amostra
-from simetria import aplicar_em_material, aplicar_restricao
+from simetria import aplicar_em_material, aplicar_restricao, campos_fixos, sistema_de_grupo
 from unidades import para_celsius, para_kelvin, temperatura_medida_para_k
 
 SISTEMAS_CRISTALINOS = ["Selecione...", "Cúbico", "Tetragonal", "Ortorrômbico", "Romboédrico",
@@ -470,10 +470,17 @@ def secao_extracao_automatica(pesquisador):
                                     st.error(f"Erro na extração: {e}")
 
 
-def campo_num(label: str, valor, fmt: str = "%.2f", minimo: float | None = 0.0, maximo: float | None = None):
+def campo_num(
+    label: str,
+    valor,
+    fmt: str = "%.2f",
+    minimo: float | None = 0.0,
+    maximo: float | None = None,
+    disabled: bool = False,
+):
     """Number input vazio quando a extração não trouxe valor — não mascara ausência com 0,00."""
     n = _numero_ou_none(valor)
-    kwargs = {"label": label, "value": n, "format": fmt, "placeholder": "—"}
+    kwargs = {"label": label, "value": n, "format": fmt, "placeholder": "—", "disabled": disabled}
     if minimo is not None:
         kwargs["min_value"] = minimo
     if maximo is not None:
@@ -484,16 +491,10 @@ def campo_num(label: str, valor, fmt: str = "%.2f", minimo: float | None = 0.0, 
 def coletar_campos_material(extraido: dict, pr: dict, rs: dict) -> dict:
     # Sem `key=` nos widgets: com key, o Streamlit guarda o valor antigo na sessão
     # e ignora o `value=` vindo da extração automática.
-    cela = aplicar_restricao({
-        "a": extraido.get("a") or pr.get("a"),
-        "b": extraido.get("b") or pr.get("b"),
-        "c": extraido.get("c") or pr.get("c"),
-        "alpha": extraido.get("alpha") or pr.get("alpha"),
-        "beta": extraido.get("beta") or pr.get("beta"),
-        "gamma": extraido.get("gamma") or pr.get("gamma"),
-        "sistema_cristalino": extraido.get("sistema_cristalino"),
-        "grupo_espacial": extraido.get("grupo_espacial") or pr.get("grupo_espacial"),
-    })
+    sistema_inicial = sistema_de_grupo(
+        extraido.get("grupo_espacial") or pr.get("grupo_espacial"),
+        extraido.get("sistema_cristalino") or pr.get("sistema_cristalino"),
+    )
 
     ident, rede, exp = st.columns([1.15, 1, 1.1])
     with ident:
@@ -505,14 +506,26 @@ def coletar_campos_material(extraido: dict, pr: dict, rs: dict) -> dict:
             sistema_cristalino = st.selectbox(
                 "Sistema cristalino",
                 SISTEMAS_CRISTALINOS,
-                index=idx_selectbox(SISTEMAS_CRISTALINOS, extraido.get("sistema_cristalino")),
+                index=idx_selectbox(SISTEMAS_CRISTALINOS, sistema_inicial),
             )
         with c2:
             grupo_espacial = st.text_input(
                 "Grupo espacial",
-                value=extraido.get("grupo_espacial") or "",
+                value=extraido.get("grupo_espacial") or pr.get("grupo_espacial") or "",
                 placeholder="R3c, P4mm",
             )
+        sistema_cristalino = sistema_de_grupo(grupo_espacial, sistema_cristalino) or sistema_cristalino
+        cela = aplicar_restricao({
+            "a": extraido.get("a") or pr.get("a"),
+            "b": extraido.get("b") or pr.get("b"),
+            "c": extraido.get("c") or pr.get("c"),
+            "alpha": extraido.get("alpha") or pr.get("alpha"),
+            "beta": extraido.get("beta") or pr.get("beta"),
+            "gamma": extraido.get("gamma") or pr.get("gamma"),
+            "sistema_cristalino": sistema_cristalino,
+            "grupo_espacial": grupo_espacial,
+        })
+        fixos = campos_fixos(cela.get("sistema_cristalino") or sistema_cristalino)
         d1, d2 = st.columns(2)
         with d1:
             dopante = st.text_input("Dopante", value=extraido.get("dopante") or "", placeholder="Sm, Co, Nd")
@@ -537,11 +550,13 @@ def coletar_campos_material(extraido: dict, pr: dict, rs: dict) -> dict:
     with rede:
         st.markdown("**Cela unitária**")
         a = campo_num("a (Å)", cela.get("a"), "%.4f")
-        b = campo_num("b (Å)", cela.get("b"), "%.4f")
-        c = campo_num("c (Å)", cela.get("c"), "%.4f")
-        alpha = campo_num("α (°)", cela.get("alpha"), "%.2f", 0.0, 180.0)
-        beta = campo_num("β (°)", cela.get("beta"), "%.2f", 0.0, 180.0)
-        gamma = campo_num("γ (°)", cela.get("gamma"), "%.2f", 0.0, 180.0)
+        b = campo_num("b (Å)", cela.get("b"), "%.4f", disabled="b" in fixos)
+        c = campo_num("c (Å)", cela.get("c"), "%.4f", disabled="c" in fixos)
+        alpha = campo_num("α (°)", cela.get("alpha"), "%.2f", 0.0, 180.0, disabled="alpha" in fixos)
+        beta = campo_num("β (°)", cela.get("beta"), "%.2f", 0.0, 180.0, disabled="beta" in fixos)
+        gamma = campo_num("γ (°)", cela.get("gamma"), "%.2f", 0.0, 180.0, disabled="gamma" in fixos)
+        if fixos:
+            st.caption("Ângulos e eixos iguais preenchidos pelo sistema/grupo espacial.")
 
     with exp:
         st.markdown("**Medida e síntese**")
@@ -1024,30 +1039,29 @@ def formulario_material(pesquisador):
     if len(st.session_state.get("extraidos") or []) > 1:
         salvar_todos_extraidos(client, pesquisador)
 
-    with st.form("form_material", clear_on_submit=True):
-        campos = coletar_campos_material(extraido, pr, rs)
-        enviado = st.form_submit_button("Salvar material")
+    campos = coletar_campos_material(extraido, pr, rs)
+    enviado = st.button("Salvar material", type="primary")
 
-        if enviado:
-            erro = validar_campos_material(campos)
-            if erro:
-                st.error(erro)
-                return
-            try:
-                salvar_material(client, pesquisador["id"], campos, medidas)
-            except Exception as e:
-                st.error(f"Erro ao salvar no Supabase: {e}")
-                return
+    if enviado:
+        erro = validar_campos_material(campos)
+        if erro:
+            st.error(erro)
+            return
+        try:
+            salvar_material(client, pesquisador["id"], campos, medidas)
+        except Exception as e:
+            st.error(f"Erro ao salvar no Supabase: {e}")
+            return
 
-            restantes = list(st.session_state.get("extraidos") or [])
-            if 0 <= indice < len(restantes):
-                restantes.pop(indice)
-            if restantes:
-                st.session_state["extraidos"] = restantes
-            else:
-                st.session_state.pop("extraidos", None)
-            st.success(f"Amostra '{campos['formula']}' salva com sucesso!")
-            st.rerun()
+        restantes = list(st.session_state.get("extraidos") or [])
+        if 0 <= indice < len(restantes):
+            restantes.pop(indice)
+        if restantes:
+            st.session_state["extraidos"] = restantes
+        else:
+            st.session_state.pop("extraidos", None)
+        st.success(f"Amostra '{campos['formula']}' salva com sucesso!")
+        st.rerun()
 
     st.divider()
     secao_acervo(client)
