@@ -43,21 +43,21 @@ def temperatura_medida_para_k(medida: dict | None) -> float | None:
     """
     if not medida:
         return None
+    k = _n(medida.get("temperatura_k"))
+    if k is not None:
+        unidade = str(medida.get("temperatura_unidade") or "K").strip().upper()
+        unidade = (
+            unidade.replace("°", "")
+            .replace("CELSIUS", "C")
+            .replace("KELVIN", "K")
+        )
+        if unidade.startswith("C"):
+            return para_kelvin(k)
+        return k
     c = _n(medida.get("temperatura_c"))
     if c is not None:
         return para_kelvin(c)
-    k = _n(medida.get("temperatura_k"))
-    if k is None:
-        return None
-    unidade = str(medida.get("temperatura_unidade") or "K").strip().upper()
-    unidade = (
-        unidade.replace("°", "")
-        .replace("CELSIUS", "C")
-        .replace("KELVIN", "K")
-    )
-    if unidade.startswith("C"):
-        return para_kelvin(k)
-    return k
+    return None
 
 
 def par_celsius_kelvin(medida: dict | None = None, rota: dict | None = None) -> tuple[float | None, float | None]:

@@ -23,7 +23,7 @@ from extracao import (
 )
 from persistencia import garantir_fonte, salvar_amostra
 from simetria import aplicar_em_material, aplicar_restricao, campos_fixos, sistema_de_grupo
-from unidades import para_celsius, para_kelvin, temperatura_medida_para_k
+from unidades import para_celsius, para_kelvin, par_celsius_kelvin, temperatura_medida_para_k
 from apresentacao import linha_tabela_medida
 
 SISTEMAS_CRISTALINOS = ["Selecione...", "Cúbico", "Tetragonal", "Ortorrômbico", "Romboédrico",
@@ -687,7 +687,7 @@ def campos_de_extraido(item: dict) -> dict:
         "beta": _numero_ou_none(sim.get("beta")),
         "gamma": _numero_ou_none(sim.get("gamma")),
         "tecnica_medicao": tecnica if tecnica in TECNICAS_MEDICAO[1:] else None,
-        "temperatura_k": temperatura_medida_para_k(pr),
+        "temperatura_k": par_celsius_kelvin(pr, rs)[1],
         "metodo": (rs.get("metodo") or "").strip() or None,
         "precursores": (rs.get("precursores") or "").strip() or None,
         "temp_calcinacao": _numero_ou_none(rs.get("temp_calcinacao")),

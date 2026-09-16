@@ -5,7 +5,7 @@ import hashlib
 
 from extracao import buscar_metadados_crossref, normalizar_doi
 from simetria import aplicar_restricao, normalizar_hm
-from unidades import sanitizar_rota, temperatura_medida_para_k
+from unidades import sanitizar_rota, par_celsius_kelvin
 
 
 def _n(valor):
@@ -150,7 +150,7 @@ def garantir_composicao(client, campos: dict) -> dict:
     return ins.data[0]
 
 
-def linha_medida(amostra_id, fonte_id, pesquisador_id, medida: dict, grupo_id=None) -> dict | None:
+def linha_medida(amostra_id, fonte_id, pesquisador_id, medida: dict, grupo_id=None, rota=None) -> dict | None:
     m = aplicar_restricao(medida)
     a, b, c = _n(m.get("a")), _n(m.get("b")), _n(m.get("c"))
     if not (a or b or c):
@@ -168,7 +168,7 @@ def linha_medida(amostra_id, fonte_id, pesquisador_id, medida: dict, grupo_id=No
         "amostra_id": amostra_id,
         "fonte_id": fonte_id,
         "condicao": m.get("condicao") or None,
-        "temperatura_k": temperatura_medida_para_k(m),
+        "temperatura_k": par_celsius_kelvin(m, rota)[1],
         "grupo_espacial_id": grupo_id,
         "grupo_espacial_hm": hm,
         "setting": setting,
@@ -233,16 +233,24 @@ def salvar_amostra(client, pesquisador_id: str, campos: dict, medidas: list[dict
             "grupo_espacial": campos.get("grupo_espacial"),
             "tecnica_medicao": campos.get("tecnica_medicao"),
             "condicao": (lista[0].get("condicao") if lista else None),
-            "temperatura_k": campos.get("temperatura_k") or temperatura_medida_para_k(lista[0] if lista else None),
+            "temperatura_k": campos.get("temperatura_k") or par_celsius_kelvin(
+                lista[0] if lista else {},
+                {"temp_sinterizacao": campos.get("temp_sinterizacao"),
+                 "temp_calcinacao": campos.get("temp_calcinacao")},
+            )[1],
         }
         linhas_src = [principal] + lista[1:]
     else:
         linhas_src = lista
 
     linhas = []
+    rota_t = {
+        "temp_sinterizacao": campos.get("temp_sinterizacao"),
+        "temp_calcinacao": campos.get("temp_calcinacao"),
+    }
     for m in linhas_src:
         grupo_id = resolver_grupo(client, m.get("grupo_espacial") or m.get("grupo_espacial_hm") or campos.get("grupo_espacial"))
-        linha = linha_medida(amostra["id"], fonte_id, pesquisador_id, m, grupo_id)
+        linha = linha_medida(amostra["id"], fonte_id, pesquisador_id, m, grupo_id, rota_t)
         if linha:
             linhas.append(linha)
     if linhas:

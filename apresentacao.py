@@ -15,8 +15,8 @@ def linha_tabela_medida(m: dict, rota: dict | None = None) -> dict:
         "T (K)": _celula(kelvin),
         "Sistema": m.get("sistema_cristalino") or "—",
         "Grupo": m.get("grupo_espacial") or m.get("grupo_espacial_hm") or "—",
-        "a (Å)": m.get("a"),
-        "b (Å)": m.get("b"),
-        "c (Å)": m.get("c"),
+        "a (Å)": _celula(m.get("a")),
+        "b (Å)": _celula(m.get("b")),
+        "c (Å)": _celula(m.get("c")),
         "Técnica": m.get("tecnica_medicao") or "—",
     }
