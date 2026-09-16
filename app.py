@@ -23,6 +23,7 @@ from extracao import (
 )
 from persistencia import garantir_fonte, salvar_amostra
 from simetria import aplicar_em_material, aplicar_restricao
+from unidades import para_celsius, para_kelvin, temperatura_medida_para_k
 
 SISTEMAS_CRISTALINOS = ["Selecione...", "Cúbico", "Tetragonal", "Ortorrômbico", "Romboédrico",
                          "Hexagonal", "Monoclínico", "Triclínico"]
@@ -549,7 +550,16 @@ def coletar_campos_material(extraido: dict, pr: dict, rs: dict) -> dict:
             TECNICAS_MEDICAO,
             index=idx_selectbox(TECNICAS_MEDICAO, pr.get("tecnica_medicao")),
         )
-        temperatura_k = campo_num("T da medida (K)", pr.get("temperatura_k"), "%.1f")
+        temperatura_c = campo_num(
+            "T da medida (°C)",
+            para_celsius(pr.get("temperatura_k")),
+            "%.1f",
+            -273.15,
+            3000.0,
+        )
+        equiv_k = para_kelvin(temperatura_c)
+        if equiv_k is not None:
+            st.caption(f"{equiv_k:.1f} K")
         metodo_sintese = st.text_input(
             "Método de síntese",
             value=rs.get("metodo") or "",
@@ -600,7 +610,7 @@ def coletar_campos_material(extraido: dict, pr: dict, rs: dict) -> dict:
         "a": a, "b": b, "c": c,
         "alpha": alpha, "beta": beta, "gamma": gamma,
         "tecnica_medicao": None if tecnica_medicao == "Selecione..." else tecnica_medicao,
-        "temperatura_k": temperatura_k,
+        "temperatura_k": para_kelvin(temperatura_c),
         "metodo": metodo_sintese.strip() or None,
         "precursores": precursores.strip() or None,
         "temp_calcinacao": temp_calcinacao,
@@ -659,7 +669,7 @@ def campos_de_extraido(item: dict) -> dict:
         "beta": _numero_ou_none(sim.get("beta")),
         "gamma": _numero_ou_none(sim.get("gamma")),
         "tecnica_medicao": tecnica if tecnica in TECNICAS_MEDICAO[1:] else None,
-        "temperatura_k": _numero_ou_none(pr.get("temperatura_k")),
+        "temperatura_k": temperatura_medida_para_k(pr),
         "metodo": (rs.get("metodo") or "").strip() or None,
         "precursores": (rs.get("precursores") or "").strip() or None,
         "temp_calcinacao": _numero_ou_none(rs.get("temp_calcinacao")),
@@ -677,6 +687,7 @@ def resumo_medidas(medidas: list[dict]) -> list[dict]:
     return [
         {
             "Condição": m.get("condicao") or "—",
+            "T (°C)": para_celsius(m.get("temperatura_k")),
             "T (K)": m.get("temperatura_k"),
             "Sistema": m.get("sistema_cristalino"),
             "Grupo": m.get("grupo_espacial"),
@@ -959,6 +970,7 @@ def secao_acervo(client):
         [
             {
                 "Condição": m.get("condicao") or "—",
+                "T (°C)": para_celsius(m.get("temperatura_k")),
                 "T (K)": m.get("temperatura_k"),
                 "Sistema": m.get("sistema_cristalino") or "—",
                 "Grupo": m.get("grupo_espacial_hm") or "—",

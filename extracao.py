@@ -9,6 +9,7 @@ import os
 import requests
 from anthropic import Anthropic
 from pypdf import PdfReader
+from unidades import temperatura_medida_para_k
 
 CLAUDE_MODEL = "claude-sonnet-5"
 
@@ -127,7 +128,7 @@ Como separar materiais de medidas:
 - A MESMA composição medida em condições diferentes (temperaturas, fases, pressões, técnicas)
   é um único material com várias entradas em "medidas".
 - Se o artigo traz uma tabela com N temperaturas, registre as N medidas, não apenas a primeira.
-  Em "condicao", identifique a medida como o artigo a identifica (ex.: "298 K", "fase cúbica a 473 K").
+  Em "condicao", identifique a medida como o artigo a identifica (ex.: "25 °C", "298 K", "fase cúbica a 200 °C").
 
 Síntese — preencha rota_sintese sempre que o experimental existir:
 - metodo: sol-gel, estado sólido, Czochralski, moagem de alta energia, etc.
@@ -148,8 +149,11 @@ Outras regras:
 - A técnica de medida normalmente vale para a série inteira: repita o mesmo valor de
   "tecnica_medicao" em todas as medidas. DRX de monocristal = "Monocristal".
 - Parâmetros de rede em Ångström (Å), ângulos em graus.
-- Temperatura de medida em kelvin; temperaturas de síntese em Celsius; tempos em horas
-  (3 min = 0,05 h).
+- Temperatura de MEDIDA estrutural (DRX/Rietveld): se o artigo der em °C, preencha
+  temperatura_c; se der em K, preencha temperatura_k. Ambiente / room temperature /
+  lab XRD sem número = temperatura_c 25. Nunca coloque temperatura de forno
+  (calcinação/sinterização, ex. 890 °C) neste campo.
+- Temperaturas de síntese sempre em Celsius; tempos em horas (3 min = 0,05 h).
 
 Texto do artigo:
 {texto}
@@ -165,9 +169,21 @@ ESQUEMA_MEDIDA = {
     "properties": {
         "condicao": {
             "type": "string",
-            "description": "Como o artigo identifica esta medida. Ex: '298 K', 'fase tetragonal', 'após sinterização'.",
+            "description": "Como o artigo identifica esta medida. Ex: '25 °C', '298 K', 'fase tetragonal'.",
         },
-        "temperatura_k": {"type": "number", "description": "Temperatura da medida, em kelvin."},
+        "temperatura_c": {
+            "type": "number",
+            "description": "Temperatura da medida em °C. Use este campo se o artigo (ou o padrão de laboratório) estiver em Celsius.",
+        },
+        "temperatura_k": {
+            "type": "number",
+            "description": "Temperatura da medida em kelvin. Use só se o artigo reportar explicitamente em K.",
+        },
+        "temperatura_unidade": {
+            "type": "string",
+            "enum": ["C", "K"],
+            "description": "Unidade do valor numérico extraído. C = Celsius, K = kelvin.",
+        },
         "sistema_cristalino": {"type": "string", "enum": SISTEMAS},
         "grupo_espacial": {"type": "string"},
         "a": {"type": "number"},
@@ -242,6 +258,10 @@ def normalizar_materiais(payload: dict) -> list[dict]:
         medidas = [m for m in (item.get("medidas") or []) if isinstance(m, dict)]
         if not medidas and item.get("parametros_rede"):
             medidas = [item["parametros_rede"]]
+        for m in medidas:
+            k = temperatura_medida_para_k(m)
+            if k is not None:
+                m["temperatura_k"] = k
         normalizados.append({**item, "medidas": medidas})
     return normalizados
 
