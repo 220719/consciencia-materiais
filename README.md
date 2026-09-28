@@ -1,16 +1,16 @@
-# 🧪 Rede de Materiais
+# Banco de Dados de Materiais Ferroicos
 
-**Plataforma colaborativa de curadoria de materiais e parâmetros de rede**, desenvolvida pelo [GDDM](#sobre-o-gddm) — Grupo de Desenvolvimento e Inovação em Dispositivos Multifuncionais — do Departamento de Física da Universidade Estadual de Maringá (UEM).
+**Plataforma colaborativa de curadoria de materiais e parâmetros de rede**, desenvolvida pelo [GDDM](#sobre-o-gddm) — Grupo de Desenvolvimento e Inovação em Dispositivos Multifuncionais — do Departamento de Física da Universidade Estadual de Maringá (UEM), no âmbito da MatFerrce.
 
-<img src="assets/logo_gddm.png" alt="Logo GDDM" width="320">
+<img src="assets/banner_matferrce.jpg" alt="MatFerrce — Materiais conversores de energia" width="720">
 
-🔗 **Acesse a plataforma:** [materiais-uem.streamlit.app](https://materiais-uem.streamlit.app)
+🔗 **Acesse a plataforma:** [materiais-matferrce.streamlit.app](https://materiais-matferrce.streamlit.app)
 
 ---
 
 ## O que é
 
-A Rede de Materiais é um banco de dados colaborativo onde professores e pesquisadores cadastram os materiais de sua pesquisa — fórmula química, sistema cristalino, parâmetros de rede, rota de síntese, caracterizações e propriedades físicas — construindo, coletivamente, um acervo consultável e citável da produção do grupo.
+O Banco de Dados de Materiais Ferroicos é um acervo colaborativo onde professores e pesquisadores cadastram os materiais de sua pesquisa — fórmula química, sistema cristalino, parâmetros de rede, rota de síntese, caracterizações e propriedades físicas — construindo, coletivamente, um acervo consultável e citável da produção do grupo.
 
 Cada pesquisador entra com sua identidade acadêmica (ORCID) e passa a contribuir com seus próprios materiais, ao mesmo tempo em que pode consultar o que já foi cadastrado por todos os colegas — sem duplicar esforço nem perder dado em planilha avulsa.
 

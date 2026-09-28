@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sobe a Rede de Materiais e relança o Streamlit se o processo cair.
+# Sobe o Banco de Dados de Materiais Ferroicos e relança o Streamlit se o processo cair.
 set -u
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
@@ -7,7 +7,7 @@ PORT="${PORT:-8502}"
 
 parar() {
   echo
-  echo "Encerrando Rede de Materiais."
+  echo "Encerrando Banco de Dados de Materiais Ferroicos."
   exit 0
 }
 trap parar INT TERM
@@ -17,7 +17,7 @@ if command -v fuser >/dev/null 2>&1; then
   sleep 1
 fi
 
-echo "Rede de Materiais — http://localhost:${PORT}"
+echo "Banco de Dados de Materiais Ferroicos — http://localhost:${PORT}"
 echo "Ctrl+C para parar. Se o Streamlit cair, ele reinicia sozinho."
 
 while true; do

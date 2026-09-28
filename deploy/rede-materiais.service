@@ -1,5 +1,5 @@
 [Unit]
-Description=Rede de Materiais (Streamlit + Supabase)
+Description=Banco de Dados de Materiais Ferroicos (Streamlit + Supabase)
 After=network-online.target
 Wants=network-online.target
 

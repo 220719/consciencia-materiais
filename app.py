@@ -86,7 +86,9 @@ def get_token_orcid_publico():
     return obter_token_publico_orcid()
 
 
-st.set_page_config(page_title="Rede de Materiais", page_icon="🧪", layout="wide")
+NOME_APP = "Banco de Dados de Materiais Ferroicos"
+
+st.set_page_config(page_title=NOME_APP, page_icon="🧪", layout="wide")
 st.markdown(
     """
     <style>
@@ -210,9 +212,7 @@ def idx_selectbox(opcoes, valor):
 
 
 def cabecalho_institucional():
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.image("assets/logo_gddm.png", width="stretch")
+    st.image("assets/banner_matferrce.jpg", width="stretch")
 
     st.markdown(
         """
@@ -236,7 +236,7 @@ def cabecalho_institucional():
 def fazer_login():
     cabecalho_institucional()
 
-    st.title("🧪 Rede de Materiais")
+    st.title(NOME_APP)
     st.caption("Entre com seu ORCID para cadastrar materiais.")
 
     url_supabase = _get_secret("SUPABASE_URL") or ""
@@ -1149,7 +1149,7 @@ def secao_acervo(client):
 
 
 def formulario_material(pesquisador):
-    st.title("🧪 Rede de Materiais")
+    st.title(NOME_APP)
     col_a, col_b = st.columns([4, 1])
     with col_a:
         st.caption(f"Logado como {pesquisador['nome'] or pesquisador['email'] or 'pesquisador'}")
@@ -1235,7 +1235,7 @@ def formulario_material(pesquisador):
 
 if supabase is None:
     cabecalho_institucional()
-    st.title("🧪 Rede de Materiais")
+    st.title(NOME_APP)
     st.error(
         "Não foi possível conectar ao Supabase. "
         "Confira SUPABASE_URL e SUPABASE_ANON_KEY no .env (local) "
@@ -1250,7 +1250,7 @@ if "access_token" in st.session_state:
     pesquisador = get_pesquisador_logado()
     if pesquisador and pesquisador.get("aprovado") is False:
         cabecalho_institucional()
-        st.title("🧪 Rede de Materiais")
+        st.title(NOME_APP)
         st.info(
             "Sua conta foi criada e aguarda aprovação. "
             "Quando for liberada, você poderá cadastrar amostras."
