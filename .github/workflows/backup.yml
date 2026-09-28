@@ -25,13 +25,16 @@ jobs:
         run: python backup.py
 
       - name: Clonar repositorio privado de backups
-        run: |
-          git clone https://x-access-token:${{ secrets.BACKUP_REPO_TOKEN }}@github.com/220719/consciencia-materiais-backups.git repo-backups
+        uses: actions/checkout@v4
+        with:
+          repository: 220719/consciencia-materiais-backups
+          path: repo-backups
+          ssh-key: ${{ secrets.BACKUP_SSH_KEY }}
 
       - name: Copiar e enviar backup
+        working-directory: repo-backups
         run: |
-          cp -r backups/* repo-backups/
-          cd repo-backups
+          cp -r ../backups/* .
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .
