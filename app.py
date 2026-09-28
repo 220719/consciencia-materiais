@@ -214,24 +214,6 @@ def idx_selectbox(opcoes, valor):
 def cabecalho_institucional():
     st.image("assets/banner_matferrce.jpg", width="stretch")
 
-    st.markdown(
-        """
-        <div style="text-align: center; margin-top: -8px; margin-bottom: 20px;">
-            <div style="font-size: 15px; font-weight: 600; color: #1a1a2e; letter-spacing: 0.4px;">
-                Universidade Estadual de Maringá
-            </div>
-            <div style="font-size: 13px; color: #555555; margin-top: 2px;">
-                Departamento de Física
-            </div>
-            <div style="font-size: 12px; color: #888888; margin-top: 4px; letter-spacing: 0.3px;">
-                Grupo de Desenvolvimento e Inovação em Dispositivos Multifuncionais (GDDM)
-            </div>
-        </div>
-        <hr style="border: none; border-top: 1px solid #e5e5e5; margin: 8px 0 28px 0;">
-        """,
-        unsafe_allow_html=True,
-    )
-
 
 def fazer_login():
     cabecalho_institucional()
